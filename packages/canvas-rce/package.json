@@ -80,6 +80,7 @@
     "instrument": false
   },
   "dependencies": {
+    "@babel/runtime-corejs3": "^7.28.6",
     "@instructure/canvas-theme": "11.6.0",
     "@instructure/canvas-media": "*",
     "@instructure/debounce": "11.6.0",
