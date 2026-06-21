@@ -1,0 +1,8 @@
+production:
+  workers:
+    - queue: canvas_queue
+      workers: <%= ENV.fetch("CANVAS_DELAYED_JOB_WORKERS", 1) %>
+
+default:
+  workers:
+    - queue: canvas_queue

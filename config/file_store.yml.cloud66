@@ -1,0 +1,6 @@
+production:
+  storage: <%= ENV["AWS_S3_BUCKET"].to_s.empty? ? "local" : "s3" %>
+  <% if ENV["AWS_S3_BUCKET"].to_s.empty? %>
+  <% path_prefix = ENV["FILE_STORAGE_PATH_PREFIX"].to_s.empty? ? "storage/files" : ENV["FILE_STORAGE_PATH_PREFIX"] %>
+  path_prefix: <%= path_prefix.inspect %>
+  <% end %>

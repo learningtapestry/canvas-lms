@@ -1,0 +1,25 @@
+production:
+  rails:
+    configuration:
+      ruby_version: "3.4.9"
+      node_version: "20"
+      asset_pipeline_enabled: false
+      asset_pipeline_precompile: false
+      do_initial_db_schema_load: false
+      bundler:
+        options:
+          without: ["development", "test"]
+      health_check:
+        protocol: "https"
+        endpoint: "/health_check"
+        accept: ["200"]
+        follow_redirects: true
+        timeout: 30
+
+  postgresql:
+    configuration:
+      version: "18.3"
+
+  redis:
+    configuration:
+      version: "8.6.2"

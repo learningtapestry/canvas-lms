@@ -1,0 +1,13 @@
+production:
+  adapter: postgresql
+  encoding: utf8
+  host: <%= ENV.fetch("POSTGRESQL_ADDRESS", "localhost") %>
+  port: <%= ENV.fetch("POSTGRESQL_PORT", 5432) %>
+  database: <%= ENV.fetch("POSTGRESQL_DATABASE") %>
+  username: <%= ENV.fetch("POSTGRESQL_USERNAME") %>
+  password: <%= ENV.fetch("POSTGRESQL_PASSWORD") %>
+  timeout: 5000
+  prepared_statements: false
+  use_qualified_names: true
+  shard_name: public
+  schema_search_path: "''"
