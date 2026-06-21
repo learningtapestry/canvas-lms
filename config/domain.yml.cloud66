@@ -1,0 +1,6 @@
+production:
+  domain: <%= (ENV["CANVAS_DOMAIN"] || ENV.fetch("WEB_ADDRESS_EXT")).sub(%r{\Ahttps?://}, "").sub(%r{/.*\z}, "") %>
+  ssl: <%= ENV.fetch("CANVAS_SSL", "true") != "false" %>
+  <% if ENV["CANVAS_FILES_DOMAIN"] && !ENV["CANVAS_FILES_DOMAIN"].empty? %>
+  files_domain: <%= ENV["CANVAS_FILES_DOMAIN"] %>
+  <% end %>

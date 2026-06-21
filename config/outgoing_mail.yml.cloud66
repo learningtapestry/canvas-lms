@@ -1,0 +1,9 @@
+production:
+  address: <%= ENV.fetch("SMTP_ADDRESS") %>
+  port: <%= ENV.fetch("SMTP_PORT", 587) %>
+  user_name: <%= ENV["SMTP_USERNAME"] %>
+  password: <%= ENV["SMTP_PASSWORD"] %>
+  authentication: <%= ENV.fetch("SMTP_AUTHENTICATION", "plain") %>
+  domain: <%= ENV["SMTP_DOMAIN"] || ENV["CANVAS_DOMAIN"] || ENV.fetch("WEB_ADDRESS_EXT", "example.com") %>
+  outgoing_address: <%= ENV["SMTP_OUTGOING_ADDRESS"] || "canvas@#{ENV["SMTP_DOMAIN"] || ENV["CANVAS_DOMAIN"] || "example.com"}" %>
+  default_name: <%= ENV.fetch("SMTP_DEFAULT_NAME", "Canvas") %>

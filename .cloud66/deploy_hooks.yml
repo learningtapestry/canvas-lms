@@ -1,0 +1,234 @@
+production:
+  first_thing:
+    - target: any
+      name: canvas system packages
+      apply_during: build_only
+      sudo: true
+      execute: true
+      inline: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          build-essential \
+          git \
+          libicu-dev \
+          libidn11-dev \
+          libxmlsec1-dev \
+          parallel \
+          pbzip2 \
+          postgresql-client \
+          python-is-python3 \
+          python3-lxml \
+          tzdata \
+          unzip
+
+  after_checkout:
+    - target: rails
+      name: canvas cloud66 config
+      run_on: all_servers
+      execute: true
+      inline: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        cp "$STACK_PATH/config/database.yml.cloud66" "$STACK_PATH/config/database.yml"
+        cp "$STACK_PATH/config/redis.yml.cloud66" "$STACK_PATH/config/redis.yml"
+        cp "$STACK_PATH/config/cache_store.yml.cloud66" "$STACK_PATH/config/cache_store.yml"
+        cp "$STACK_PATH/config/security.yml.cloud66" "$STACK_PATH/config/security.yml"
+        cp "$STACK_PATH/config/domain.yml.cloud66" "$STACK_PATH/config/domain.yml"
+        cp "$STACK_PATH/config/file_store.yml.cloud66" "$STACK_PATH/config/file_store.yml"
+        cp "$STACK_PATH/config/delayed_jobs.yml.cloud66" "$STACK_PATH/config/delayed_jobs.yml"
+
+        if [ -n "${AWS_S3_BUCKET:-}" ]; then
+          cp "$STACK_PATH/config/amazon_s3.yml.cloud66" "$STACK_PATH/config/amazon_s3.yml"
+        fi
+
+        if [ -n "${SMTP_ADDRESS:-}" ]; then
+          cp "$STACK_PATH/config/outgoing_mail.yml.cloud66" "$STACK_PATH/config/outgoing_mail.yml"
+        fi
+
+        file_storage_path_prefix="${FILE_STORAGE_PATH_PREFIX:-storage/files}"
+        case "$file_storage_path_prefix" in
+          ""|/*|".."|../*|*/..|*/../*)
+            echo "FILE_STORAGE_PATH_PREFIX must be a relative path without .. segments."
+            exit 1
+            ;;
+        esac
+
+        release_parent="$(dirname "$STACK_PATH")"
+        if [ "$(basename "$release_parent")" = "releases" ]; then
+          app_root="$(dirname "$release_parent")"
+          shared_root="$app_root/shared"
+          current_release_path="$app_root/current"
+          release_file_storage_path="$STACK_PATH/$file_storage_path_prefix"
+          shared_file_storage_path="$shared_root/$file_storage_path_prefix"
+          previous_file_storage_path="$current_release_path/$file_storage_path_prefix"
+
+          mkdir -p "$shared_file_storage_path" "$(dirname "$release_file_storage_path")"
+
+          if [ -d "$previous_file_storage_path" ] && [ ! -L "$previous_file_storage_path" ] && [ -z "$(find "$shared_file_storage_path" -mindepth 1 -print -quit)" ]; then
+            echo "Bootstrapping local file storage from current release into shared storage."
+            cp -a "$previous_file_storage_path/." "$shared_file_storage_path/"
+          fi
+
+          if [ -e "$release_file_storage_path" ] && [ ! -L "$release_file_storage_path" ]; then
+            rmdir "$release_file_storage_path"
+          fi
+
+          ln -sfn "$shared_file_storage_path" "$release_file_storage_path"
+        else
+          mkdir -p "$STACK_PATH/$file_storage_path_prefix"
+        fi
+
+  after_bundle:
+    - target: rails
+      name: canvas assets
+      run_on: single_server
+      execute: true
+      inline: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        cd "$STACK_PATH"
+        export NO_COLOR=1
+        export TERM=dumb
+
+        release_parent="$(dirname "$STACK_PATH")"
+        if [ "$(basename "$release_parent")" = "releases" ]; then
+          shared_root="$(dirname "$release_parent")/shared"
+        else
+          shared_root="$STACK_PATH"
+        fi
+
+        mkdir -p "$shared_root/log"
+        asset_log="$shared_root/log/cloud66-assets-$(date -u +%Y%m%d%H%M%S).log"
+
+        run_with_log() {
+          local name="$1"
+          shift
+          local started
+          local pid
+          local status
+
+          started="$(date +%s)"
+          echo "Starting ${name}; detailed output is in ${asset_log}"
+
+          set +e
+          "$@" >> "$asset_log" 2>&1 &
+          pid="$!"
+
+          while kill -0 "$pid" 2>/dev/null; do
+            sleep 60
+            echo "Still running ${name} after $(( $(date +%s) - started ))s; log size: $(du -h "$asset_log" | awk '{print $1}')"
+          done
+
+          wait "$pid"
+          status="$?"
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            echo "${name} failed with exit code ${status}. Last 20000 bytes from ${asset_log}:"
+            tail -c 20000 "$asset_log" || true
+            exit "$status"
+          fi
+
+          echo "Finished ${name} in $(( $(date +%s) - started ))s"
+        }
+
+        run_with_log "corepack setup" corepack enable
+        run_with_log "yarn activation" corepack prepare yarn@1.19.1 --activate
+        run_with_log "yarn install" bash -lc 'yarn install --frozen-lockfile --production=false || yarn install --frozen-lockfile --production=false --network-concurrency 1'
+        run_with_log "canvas asset compile" env \
+          RAILS_ENV=production \
+          USE_OPTIMIZED_JS=true \
+          JS_BUILD_NO_FALLBACK=1 \
+          SKIP_SOURCEMAPS=1 \
+          COMPILE_ASSETS_NPM_INSTALL=0 \
+          COMPILE_ASSETS_STYLEGUIDE=0 \
+          COMPILE_ASSETS_API_DOCS=0 \
+          COMPILE_ASSETS_BRAND_CONFIGS=0 \
+          CANVAS_BUILD_CONCURRENCY="${CANVAS_BUILD_CONCURRENCY:-2}" \
+          bin/rails canvas:compile_assets --trace
+
+        rm -rf node_modules
+
+  after_symlink:
+    - target: rails
+      name: canvas database setup
+      run_on: single_server
+      execute: true
+      inline: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        cd "$STACK_PATH"
+        export RAILS_ENV=production
+        export CANVAS_LMS_ADMIN_PASSWORD="$(openssl rand -base64 32)"
+        export CANVAS_LMS_ACCOUNT_NAME="Admin"
+        export CANVAS_LMS_STATS_COLLECTION="opt_out"
+
+        release_parent="$(dirname "$STACK_PATH")"
+        if [ "$(basename "$release_parent")" = "releases" ]; then
+          shared_root="$(dirname "$release_parent")/shared"
+        else
+          shared_root="$STACK_PATH"
+        fi
+
+        mkdir -p "$shared_root/log"
+        db_log="$shared_root/log/cloud66-db-$(date -u +%Y%m%d%H%M%S).log"
+
+        run_with_log() {
+          local name="$1"
+          shift
+          local started
+          local pid
+          local status
+
+          started="$(date +%s)"
+          echo "Starting ${name}; detailed output is in ${db_log}"
+
+          set +e
+          "$@" >> "$db_log" 2>&1 &
+          pid="$!"
+
+          while kill -0 "$pid" 2>/dev/null; do
+            sleep 60
+            echo "Still running ${name} after $(( $(date +%s) - started ))s; log size: $(du -h "$db_log" | awk '{print $1}')"
+          done
+
+          wait "$pid"
+          status="$?"
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            echo "${name} failed with exit code ${status}. Last 20000 bytes from ${db_log}:"
+            tail -c 20000 "$db_log" || true
+            exit "$status"
+          fi
+
+          echo "Finished ${name} in $(( $(date +%s) - started ))s"
+        }
+
+        canvas_schema_exists="$(
+          PGPASSWORD="$POSTGRESQL_PASSWORD" \
+          psql \
+            -h "${POSTGRESQL_ADDRESS:-localhost}" \
+            -p "${POSTGRESQL_PORT:-5432}" \
+            -U "$POSTGRESQL_USERNAME" \
+            -d "$POSTGRESQL_DATABASE" \
+            -Atqc "select to_regclass('public.settings') is not null"
+        )"
+
+        if [ "$canvas_schema_exists" = "t" ]; then
+          run_with_log "database migrations" bin/rails db:migrate
+        else
+          if [ -z "${CANVAS_LMS_ADMIN_EMAIL:-}" ]; then
+            echo "Fresh Canvas database detected, but initial setup variables are missing."
+            echo "Set CANVAS_LMS_ADMIN_EMAIL in Cloud 66."
+            exit 1
+          fi
+
+          run_with_log "initial database setup" bin/rails db:initial_setup
+        fi
