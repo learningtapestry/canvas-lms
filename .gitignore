@@ -41,7 +41,8 @@ CLAUDE.local.md
 /db/*sql
 docker-compose.override.yml
 /exports/
-/Gemfile.*.plugins.lock
+# Canvas plugin lockfiles are required for frozen production deploys.
+!/Gemfile.*.plugins.lock
 /log/*
 !/log/.keep
 !/log/parallel-runtime-rspec.log
