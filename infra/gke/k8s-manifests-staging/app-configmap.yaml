@@ -24,6 +24,8 @@ data:
   CANVAS_LTI_ISS: https://canvas.instructure.com
   # first-deploy admin (db:initial_setup) — replace with a real address
   CANVAS_LMS_ADMIN_EMAIL: admin@example.com
+  # skip the interactive telemetry prompt during db:initial_setup
+  CANVAS_LMS_STATS_COLLECTION: opt_out
   # file_store.yml.cloud66 — local storage on the canvas-files PVC
   FILE_STORAGE_PATH_PREFIX: storage/files
   # delayed_jobs.yml.cloud66

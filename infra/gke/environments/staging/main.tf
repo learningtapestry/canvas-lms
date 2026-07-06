@@ -48,6 +48,14 @@ resource "random_password" "jwt_encryption_key" {
   special = false
 }
 
+# Rails secret_key_base — signs the session cookie. Cloud66 auto-injects this;
+# on GKE we must provide it, or Canvas can't set the session cookie (login
+# breaks). Stable value so sessions survive pod restarts.
+resource "random_password" "secret_key_base" {
+  length  = 128
+  special = false
+}
+
 module "cloudsql" {
   source              = "../../modules/cloudsql"
   name                = local.name
@@ -82,6 +90,22 @@ module "artifact_registry" {
   source        = "../../modules/artifact_registry"
   repository_id = "canvas"
   region        = var.region
+}
+
+# GKE Autopilot nodes run as the default compute SA, which has no roles by
+# default in new projects — grant it pull access so pods can pull the image.
+data "google_project" "this" {
+  project_id = var.project_id
+}
+
+resource "google_artifact_registry_repository_iam_member" "node_pull" {
+  project    = var.project_id
+  location   = var.region
+  repository = "canvas"
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${data.google_project.this.number}-compute@developer.gserviceaccount.com"
+
+  depends_on = [module.artifact_registry]
 }
 
 # ------------------------------------------------------------------------------
@@ -146,6 +170,8 @@ resource "google_secret_manager_secret_version" "app" {
     # security.yml.cloud66
     ENCRYPTION_KEY     = random_password.encryption_key.result
     JWT_ENCRYPTION_KEY = random_password.jwt_encryption_key.result
+    # Rails cookie signing (Cloud66 auto-provides this; we must too)
+    SECRET_KEY_BASE = random_password.secret_key_base.result
   })
 }
 

@@ -17,6 +17,17 @@ copied → **local file storage, no SMTP**.
   `CANVAS_REDIS_DB`, `CANVAS_DOMAIN`, `CANVAS_LMS_ADMIN_EMAIL`,
   `FILE_STORAGE_PATH_PREFIX`, etc.
 
+## Runtime requirements (learned the hard way)
+- **HTTPS is mandatory.** Canvas hardcodes `config.force_ssl = true`, so the
+  session cookie is `secure` — it won't work over plain HTTP, and login fails
+  with a CSRF 400. The ingress must terminate TLS.
+- **Passenger, not `rails server`.** Canvas sets `public_file_server.enabled =
+  false` and relies on Passenger/nginx to serve `public/dist`. The web pod runs
+  `passenger start` (the image is `instructure/ruby-passenger`).
+- **`SECRET_KEY_BASE` must be provided** (via the secret) — Cloud66 auto-injects
+  it; on GKE Canvas can't sign the session cookie without it.
+- **`RAILS_SERVE_STATIC_FILES` has no effect** — Canvas ignores it.
+
 ## Storage (approach B)
 Local file storage on a single **ReadWriteOnce** Persistent Disk (`canvas-files`
 PVC) mounted at `/usr/src/app/storage/files`. The **web** and **jobs** pods are

@@ -26,8 +26,10 @@ spec:
           image: us-central1-docker.pkg.dev/propane-country-501515-c2/canvas/canvas-lms:staging
           imagePullPolicy: Always
           # Activate the cloud66 config templates (the deploy-hook equivalent),
-          # then run Puma. amazon_s3 / outgoing_mail are intentionally not
-          # copied -> local file storage, no SMTP.
+          # then run Passenger. Canvas sets public_file_server.enabled=false, so
+          # it needs Passenger/nginx (not `rails server`) to serve public/dist.
+          # amazon_s3 / outgoing_mail are intentionally not copied -> local file
+          # storage, no SMTP.
           command: ["/bin/bash", "-lc"]
           args:
             - |
@@ -36,7 +38,7 @@ spec:
               for f in database redis cache_store security domain file_store delayed_jobs; do
                 cp "config/$f.yml.cloud66" "config/$f.yml"
               done
-              exec bundle exec rails server -b 0.0.0.0 -p 3000 -e production
+              exec passenger start -p 3000 -e production --max-pool-size 3 --min-instances 1
           ports:
             - containerPort: 3000
           envFrom:
