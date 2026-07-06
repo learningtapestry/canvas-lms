@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: canvas-env
+  namespace: canvas-staging
+data:
+  RAILS_ENV: production
+  RACK_ENV: production
+  # Public hostname (also used by domain.yml). Replace with the real host.
+  CANVAS_DOMAIN: canvas-staging.example.com
+  # Rails/Puma
+  RAILS_LOG_TO_STDOUT: "1"
+  DB_POOL: "10"
+  WEB_CONCURRENCY: "2"
+  RAILS_MAX_THREADS: "5"

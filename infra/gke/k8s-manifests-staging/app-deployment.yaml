@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canvas-web
+  namespace: canvas-staging
+  labels:
+    app: canvas-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: canvas-web
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: canvas-web
+    spec:
+      serviceAccountName: canvas-app
+      containers:
+        - name: canvas-web
+          # Production image (assets precompiled) — built + pushed by CI.
+          # Replace PROJECT_ID; the repo Dockerfile is dev-only.
+          image: us-central1-docker.pkg.dev/PROJECT_ID/canvas/canvas-lms:staging
+          imagePullPolicy: Always
+          # Run Puma directly on a non-privileged port (Autopilot is non-root),
+          # rather than the image's Passenger/nginx on :80.
+          command: ["bundle", "exec", "rails", "server", "-b", "0.0.0.0", "-p", "3000", "-e", "production"]
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: canvas-env
+            - secretRef:
+                name: canvas-secrets
+          readinessProbe:
+            httpGet:
+              path: /health_check
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health_check
+              port: 3000
+            initialDelaySeconds: 90
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "2560Mi"
+          volumeMounts:
+            - { name: config, mountPath: /usr/src/app/config/database.yml, subPath: database.yml }
+            - { name: config, mountPath: /usr/src/app/config/redis.yml, subPath: redis.yml }
+            - { name: config, mountPath: /usr/src/app/config/cache_store.yml, subPath: cache_store.yml }
+            - { name: config, mountPath: /usr/src/app/config/security.yml, subPath: security.yml }
+            - { name: config, mountPath: /usr/src/app/config/amazon_s3.yml, subPath: amazon_s3.yml }
+            - { name: config, mountPath: /usr/src/app/config/file_store.yml, subPath: file_store.yml }
+            - { name: config, mountPath: /usr/src/app/config/domain.yml, subPath: domain.yml }
+            - { name: config, mountPath: /usr/src/app/config/outgoing_mail.yml, subPath: outgoing_mail.yml }
+      volumes:
+        - name: config
+          configMap:
+            name: canvas-config-files
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: canvas-web
+  namespace: canvas-staging
+spec:
+  type: ClusterIP
+  selector:
+    app: canvas-web
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000

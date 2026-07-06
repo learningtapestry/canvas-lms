@@ -1,0 +1,65 @@
+# Canvas is config-file-driven. These are the config/*.yml files, rendered via
+# ERB from environment variables (Canvas runs config files through ERB). The
+# non-secret templates live here; the values come from the `canvas-secrets`
+# Secret (via External Secrets) and the `canvas-env` ConfigMap, injected as env
+# vars. Each file is mounted into /usr/src/app/config/<file> via subPath.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: canvas-config-files
+  namespace: canvas-staging
+data:
+  database.yml: |
+    production:
+      adapter: postgresql
+      encoding: utf8
+      database: <%= ENV['DB_NAME'] %>
+      host: <%= ENV['DB_HOST'] %>
+      username: <%= ENV['DB_USERNAME'] %>
+      password: <%= ENV['DB_PASSWORD'] %>
+      timeout: 5000
+      pool: <%= ENV.fetch('DB_POOL', 5) %>
+
+  redis.yml: |
+    production:
+      url: <%= ENV['REDIS_URL'] %>
+
+  cache_store.yml: |
+    production:
+      cache_store: redis_cache_store
+
+  security.yml: |
+    production:
+      encryption_key: <%= ENV['ENCRYPTION_KEY'] %>
+      lti_iss: 'https://canvas.instructure.com'
+
+  # Canvas attachment storage via GCS S3-interoperability. NOTE: the `endpoint`
+  # key must be honoured by Canvas' S3 client for this to hit GCS instead of
+  # AWS — validate against the running image; a small patch may be needed.
+  amazon_s3.yml: |
+    production:
+      bucket_name: <%= ENV['GCS_BUCKET'] %>
+      access_key_id: <%= ENV['GCS_HMAC_ACCESS_KEY'] %>
+      secret_access_key: <%= ENV['GCS_HMAC_SECRET_KEY'] %>
+      region: <%= ENV['GCS_S3_INTEROP_REGION'] %>
+      endpoint: https://storage.googleapis.com
+
+  file_store.yml: |
+    production:
+      storage: s3
+
+  domain.yml: |
+    production:
+      domain: <%= ENV['CANVAS_DOMAIN'] %>
+      ssl: true
+
+  # Minimal placeholder — wire to a real SMTP relay (e.g. SendGrid) before
+  # relying on outbound email.
+  outgoing_mail.yml: |
+    production:
+      delivery_method: smtp
+      address: <%= ENV.fetch('SMTP_ADDRESS', 'localhost') %>
+      port: <%= ENV.fetch('SMTP_PORT', '25') %>
+      domain: <%= ENV['CANVAS_DOMAIN'] %>
+      outgoing_address: <%= ENV.fetch('SMTP_FROM', 'canvas@example.com') %>
+      default_name: "Canvas"

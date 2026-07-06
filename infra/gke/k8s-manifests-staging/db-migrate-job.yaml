@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: canvas-db-migrate-
+  namespace: canvas-staging
+  labels:
+    app: canvas-web
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: canvas-web
+    spec:
+      serviceAccountName: canvas-app
+      restartPolicy: Never
+      containers:
+        - name: db-migrate
+          image: us-central1-docker.pkg.dev/PROJECT_ID/canvas/canvas-lms:staging
+          imagePullPolicy: Always
+          # First deploy: `rake db:initial_setup` bootstraps the schema; on
+          # subsequent deploys use `rake db:migrate`. Adjust per run.
+          command: ["bundle", "exec", "rake", "db:migrate", "RAILS_ENV=production"]
+          envFrom:
+            - configMapRef:
+                name: canvas-env
+            - secretRef:
+                name: canvas-secrets
+          volumeMounts:
+            - { name: config, mountPath: /usr/src/app/config/database.yml, subPath: database.yml }
+            - { name: config, mountPath: /usr/src/app/config/redis.yml, subPath: redis.yml }
+            - { name: config, mountPath: /usr/src/app/config/cache_store.yml, subPath: cache_store.yml }
+            - { name: config, mountPath: /usr/src/app/config/security.yml, subPath: security.yml }
+            - { name: config, mountPath: /usr/src/app/config/amazon_s3.yml, subPath: amazon_s3.yml }
+            - { name: config, mountPath: /usr/src/app/config/file_store.yml, subPath: file_store.yml }
+            - { name: config, mountPath: /usr/src/app/config/domain.yml, subPath: domain.yml }
+            - { name: config, mountPath: /usr/src/app/config/outgoing_mail.yml, subPath: outgoing_mail.yml }
+      volumes:
+        - name: config
+          configMap:
+            name: canvas-config-files
