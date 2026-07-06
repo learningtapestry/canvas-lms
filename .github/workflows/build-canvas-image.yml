@@ -1,0 +1,72 @@
+name: Build Canvas image
+
+# Manual, deliberate builds — pushes the production Canvas image to Artifact
+# Registry. Auth is keyless via Workload Identity Federation (no stored keys).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to push"
+        required: true
+        default: staging
+
+permissions:
+  contents: read
+  id-token: write # required for the WIF OIDC token
+
+env:
+  IMAGE: us-central1-docker.pkg.dev/propane-country-501515-c2/canvas/canvas-lms
+  WIF_PROVIDER: projects/471927261241/locations/global/workloadIdentityPools/github-actions/providers/github
+  WIF_SERVICE_ACCOUNT: github-actions@propane-country-501515-c2.iam.gserviceaccount.com
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Canvas' asset build is disk-hungry; reclaim ~10-15 GB on the runner.
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/.ghcup
+          sudo docker image prune -af || true
+          df -h /
+
+      - name: Set up Ruby (for the Dockerfile generator)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+
+      - name: Generate production Dockerfile
+        run: |
+          gem install erubi --no-document
+          ruby build/dockerfile_writer.rb --env production \
+            --compose-file inst-cli/docker-compose/docker-compose.local.dev.yml \
+            --in build/Dockerfile.template --out Dockerfile.production
+          echo "----- generated Dockerfile.production -----"
+          cat Dockerfile.production
+
+      - id: auth
+        name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.production
+          push: true
+          tags: ${{ env.IMAGE }}:${{ inputs.tag }}
+          provenance: false

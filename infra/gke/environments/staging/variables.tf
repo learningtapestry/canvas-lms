@@ -58,3 +58,9 @@ variable "deletion_protection" {
   type    = bool
   default = true
 }
+
+variable "github_repository" {
+  description = "owner/repo allowed to push images via Workload Identity Federation"
+  type        = string
+  default     = "learningtapestry/canvas-lms"
+}

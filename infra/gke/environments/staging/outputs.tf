@@ -36,3 +36,13 @@ output "app_secret_name" {
   description = "Secret Manager key the ExternalSecret reads"
   value       = google_secret_manager_secret.app.secret_id
 }
+
+output "github_actions_wif_provider" {
+  description = "Set as the workflow's workload_identity_provider"
+  value       = google_iam_workload_identity_pool_provider.github.name
+}
+
+output "github_actions_service_account" {
+  description = "Set as the workflow's service_account"
+  value       = google_service_account.github_actions.email
+}
