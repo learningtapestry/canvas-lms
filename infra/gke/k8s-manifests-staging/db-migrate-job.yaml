@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: canvas-db-migrate-
+  namespace: canvas-staging
+  labels:
+    app: canvas-web
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: canvas-web
+    spec:
+      serviceAccountName: canvas-app
+      restartPolicy: Never
+      containers:
+        - name: db-migrate
+          image: us-central1-docker.pkg.dev/propane-country-501515-c2/canvas/canvas-lms:staging
+          imagePullPolicy: Always
+          command: ["/bin/bash", "-lc"]
+          # Activate cloud66 config, then migrate. FIRST deploy against an empty
+          # database: append `&& bundle exec rails db:initial_setup` (uses
+          # CANVAS_LMS_ADMIN_EMAIL to seed the admin, mirroring the cloud66 hook).
+          args:
+            - |
+              set -euo pipefail
+              cd /usr/src/app
+              for f in database redis cache_store security domain file_store delayed_jobs; do
+                cp "config/$f.yml.cloud66" "config/$f.yml"
+              done
+              bundle exec rails db:migrate
+          envFrom:
+            - configMapRef:
+                name: canvas-env
+            - secretRef:
+                name: canvas-secrets

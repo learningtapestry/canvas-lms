@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canvas-web
+  namespace: canvas-staging
+  labels:
+    app: canvas-web
+spec:
+  # Approach B: single replica sharing a ReadWriteOnce PD with the jobs pod.
+  replicas: 1
+  # Recreate (not RollingUpdate): a RWO disk can't attach to a new pod on
+  # another node while the old one holds it.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: canvas-web
+  template:
+    metadata:
+      labels:
+        app: canvas-web
+    spec:
+      serviceAccountName: canvas-app
+      containers:
+        - name: canvas-web
+          image: us-central1-docker.pkg.dev/propane-country-501515-c2/canvas/canvas-lms:staging
+          imagePullPolicy: Always
+          # Activate the cloud66 config templates (the deploy-hook equivalent),
+          # then run Puma. amazon_s3 / outgoing_mail are intentionally not
+          # copied -> local file storage, no SMTP.
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              cd /usr/src/app
+              for f in database redis cache_store security domain file_store delayed_jobs; do
+                cp "config/$f.yml.cloud66" "config/$f.yml"
+              done
+              exec bundle exec rails server -b 0.0.0.0 -p 3000 -e production
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: canvas-env
+            - secretRef:
+                name: canvas-secrets
+          readinessProbe:
+            httpGet:
+              path: /health_check
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health_check
+              port: 3000
+            initialDelaySeconds: 150
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "3Gi"
+          volumeMounts:
+            - name: files
+              mountPath: /usr/src/app/storage/files
+      volumes:
+        - name: files
+          persistentVolumeClaim:
+            claimName: canvas-files
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: canvas-web
+  namespace: canvas-staging
+spec:
+  type: ClusterIP
+  selector:
+    app: canvas-web
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000

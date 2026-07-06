@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canvas-jobs
+  namespace: canvas-staging
+  labels:
+    app: canvas-jobs
+spec:
+  # Single worker for staging (scale = replicas). Shares the canvas-files PD
+  # with the web pod, so it must land on the same node.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: canvas-jobs
+  template:
+    metadata:
+      labels:
+        app: canvas-jobs
+    spec:
+      serviceAccountName: canvas-app
+      # Colocate with the web pod so the ReadWriteOnce disk can be shared.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: canvas-web
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: canvas-jobs
+          image: us-central1-docker.pkg.dev/propane-country-501515-c2/canvas/canvas-lms:staging
+          imagePullPolicy: Always
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              cd /usr/src/app
+              for f in database redis cache_store security domain file_store delayed_jobs; do
+                cp "config/$f.yml.cloud66" "config/$f.yml"
+              done
+              exec bundle exec script/delayed_job run
+          envFrom:
+            - configMapRef:
+                name: canvas-env
+            - secretRef:
+                name: canvas-secrets
+          livenessProbe:
+            exec:
+              command: ["/bin/bash", "-lc", "pgrep -f delayed_job >/dev/null"]
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "3Gi"
+          volumeMounts:
+            - name: files
+              mountPath: /usr/src/app/storage/files
+      volumes:
+        - name: files
+          persistentVolumeClaim:
+            claimName: canvas-files

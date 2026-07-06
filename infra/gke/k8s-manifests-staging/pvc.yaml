@@ -1,0 +1,15 @@
+# Local file storage for Canvas attachments (approach B: a single ReadWriteOnce
+# Persistent Disk shared by the web + jobs pods, which are colocated on one node
+# via pod affinity). Canvas writes uploads under storage/files.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: canvas-files
+  namespace: canvas-staging
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard-rwo # default GKE Autopilot PD class
+  resources:
+    requests:
+      storage: 20Gi
