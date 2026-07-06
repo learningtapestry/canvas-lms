@@ -21,6 +21,10 @@ spec:
         app: canvas-web
     spec:
       serviceAccountName: canvas-app
+      # Pin to the DB's zone so the RWO file PD is created there too — keeps
+      # DB + files + pods in one zone (single, well-understood zonal dependency).
+      nodeSelector:
+        topology.kubernetes.io/zone: us-central1-f
       containers:
         - name: canvas-web
           image: us-central1-docker.pkg.dev/propane-country-501515-c2/canvas/canvas-lms:staging
@@ -46,20 +50,25 @@ spec:
                 name: canvas-env
             - secretRef:
                 name: canvas-secrets
+          # Readiness gates on dependencies (/health_check hits DB+Redis) so the
+          # pod leaves the LB when they're down. Liveness is a lightweight TCP
+          # check — do NOT gate liveness on DB health, or a DB blip crash-loops
+          # the pod. 5s timeout: /health_check can be slow under load.
           readinessProbe:
             httpGet:
               path: /health_check
               port: 3000
-            initialDelaySeconds: 60
+            initialDelaySeconds: 45
             periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 6
           livenessProbe:
-            httpGet:
-              path: /health_check
+            tcpSocket:
               port: 3000
-            initialDelaySeconds: 150
+            initialDelaySeconds: 120
             periodSeconds: 20
-            failureThreshold: 3
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             requests:
               cpu: "500m"

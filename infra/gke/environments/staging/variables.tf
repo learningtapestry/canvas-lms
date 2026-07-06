@@ -37,6 +37,12 @@ variable "db_tier" {
   default     = "db-custom-2-7680"
 }
 
+variable "db_zone" {
+  description = "Zone for the ZONAL Cloud SQL instance (co-located with pods/PD)"
+  type        = string
+  default     = "us-central1-f"
+}
+
 variable "db_name" {
   type    = string
   default = "canvas_production"

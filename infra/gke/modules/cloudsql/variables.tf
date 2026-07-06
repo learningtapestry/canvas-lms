@@ -28,6 +28,12 @@ variable "availability_type" {
   default = "ZONAL"
 }
 
+variable "zone" {
+  description = "Preferred zone for a ZONAL instance (null = let Google choose)"
+  type        = string
+  default     = null
+}
+
 variable "disk_size" {
   type    = number
   default = 50

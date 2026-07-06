@@ -22,6 +22,15 @@ resource "google_sql_database_instance" "this" {
     disk_size         = var.disk_size
     disk_autoresize   = true
 
+    # Pin the zone so the DB stays co-located with the pods + file PD
+    # (avoids a cross-zone dependency). Only meaningful for ZONAL instances.
+    dynamic "location_preference" {
+      for_each = var.zone == null ? [] : [1]
+      content {
+        zone = var.zone
+      }
+    }
+
     ip_configuration {
       ipv4_enabled    = false
       private_network = var.network_id
