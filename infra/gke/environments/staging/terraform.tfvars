@@ -1,4 +1,4 @@
-project_id = "REPLACE_ME" # target GCP project id
+project_id = "propane-country-501515-c2" # target GCP project id
 region     = "us-central1"
 env        = "staging"
 

@@ -24,7 +24,7 @@ spec:
       serviceAccountName: canvas-app
       containers:
         - name: canvas-jobs
-          image: us-central1-docker.pkg.dev/PROJECT_ID/canvas/canvas-lms:staging
+          image: us-central1-docker.pkg.dev/propane-country-501515-c2/canvas/canvas-lms:staging
           imagePullPolicy: Always
           command: ["bundle", "exec", "script/delayed_job", "run"]
           envFrom:

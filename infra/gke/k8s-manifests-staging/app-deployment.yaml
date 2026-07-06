@@ -23,8 +23,8 @@ spec:
       containers:
         - name: canvas-web
           # Production image (assets precompiled) — built + pushed by CI.
-          # Replace PROJECT_ID; the repo Dockerfile is dev-only.
-          image: us-central1-docker.pkg.dev/PROJECT_ID/canvas/canvas-lms:staging
+          # The repo Dockerfile is dev-only; a prod image build is required.
+          image: us-central1-docker.pkg.dev/propane-country-501515-c2/canvas/canvas-lms:staging
           imagePullPolicy: Always
           # Run Puma directly on a non-privileged port (Autopilot is non-root),
           # rather than the image's Passenger/nginx on :80.

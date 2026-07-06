@@ -39,8 +39,9 @@ it with TLS. Health via Canvas' `/health_check`.
    `Dockerfile` is dev-only.
 
 ## Replace before applying
-`PROJECT_ID`, `us-central1` (if different), `canvas-staging.example.com`,
-cert-manager email.
+Project id (`propane-country-501515-c2`) and region (`us-central1`) are set.
+Still to fill: real hostname (`canvas-staging.example.com`) and the cert-manager
+account email.
 
 ## ⚠️ Open items to validate
 - **GCS S3-interop**: Canvas' S3 client must honour the `endpoint` override in

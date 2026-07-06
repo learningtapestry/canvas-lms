@@ -14,4 +14,4 @@ spec:
       # (roles/dns.admin).
       - dns01:
           cloudDNS:
-            project: PROJECT_ID
+            project: propane-country-501515-c2
