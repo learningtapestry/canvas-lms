@@ -61,7 +61,7 @@ module "cloudsql" {
   name                = local.name
   region              = var.region
   network_id          = module.network.network_id
-  database_version    = "POSTGRES_17" # prod runs 18.x; 17 is Cloud SQL's max
+  database_version    = "POSTGRES_18" # match prod (18.4) for a clean dump/restore
   zone                = var.db_zone   # co-locate with pods + file PD
   tier                = var.db_tier
   db_name             = var.db_name
