@@ -41,6 +41,16 @@ jobs:
           sudo docker image prune -af || true
           df -h /
 
+      # The `instructure/xsslint` GitHub repo (a dev-only XSS linter pinned in
+      # package.json) has been removed, so `yarn install --frozen-lockfile`
+      # 404s. It's not used by asset compilation or runtime — drop it from the
+      # build's copy so the lockfile stays consistent.
+      - name: Strip dead dev-only dependency (xsslint)
+        run: |
+          jq 'del(.devDependencies.xsslint)' package.json > package.json.tmp && mv package.json.tmp package.json
+          awk '/^xsslint@instructure\/xsslint#babel7:/{skip=1} skip && /^$/{skip=0; next} skip{next} {print}' yarn.lock > yarn.lock.tmp && mv yarn.lock.tmp yarn.lock
+          echo "xsslint refs remaining: $(grep -c xsslint package.json yarn.lock | paste -sd+ - | bc 2>/dev/null || echo 0)"
+
       - id: auth
         name: Authenticate to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
