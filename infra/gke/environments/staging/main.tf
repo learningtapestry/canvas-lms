@@ -91,6 +91,9 @@ module "app_sa" {
   project_roles = ["roles/cloudsql.client"]
   ksa_namespace = local.namespace
   ksa_name      = local.ksa_app
+
+  # WI bindings need the cluster's identity pool (PROJECT.svc.id.goog) to exist.
+  depends_on = [module.gke]
 }
 
 module "external_secrets_sa" {
@@ -100,6 +103,8 @@ module "external_secrets_sa" {
   display_name  = "External Secrets Operator (Canvas)"
   ksa_namespace = "external-secrets"
   ksa_name      = "external-secrets"
+
+  depends_on = [module.gke]
 }
 
 module "cert_manager_sa" {
@@ -110,6 +115,8 @@ module "cert_manager_sa" {
   project_roles = ["roles/dns.admin"]
   ksa_namespace = "cert-manager"
   ksa_name      = "cert-manager"
+
+  depends_on = [module.gke]
 }
 
 # Attachment storage: grant the app object access, then mint an HMAC key so
