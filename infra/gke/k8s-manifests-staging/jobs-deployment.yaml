@@ -6,27 +6,41 @@ metadata:
   labels:
     app: canvas-jobs
 spec:
-  # inst-jobs (delayed_job). `run` is a single foreground worker per pod;
-  # scale by replicas. 2 replicas so job processing survives a pod loss.
-  replicas: 2
+  # Single worker for staging (scale = replicas). Shares the canvas-files PD
+  # with the web pod, so it must land on the same node.
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: canvas-jobs
-  strategy:
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
   template:
     metadata:
       labels:
         app: canvas-jobs
     spec:
       serviceAccountName: canvas-app
+      # Colocate with the web pod so the ReadWriteOnce disk can be shared.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: canvas-web
+              topologyKey: kubernetes.io/hostname
       containers:
         - name: canvas-jobs
           image: us-central1-docker.pkg.dev/propane-country-501515-c2/canvas/canvas-lms:staging
           imagePullPolicy: Always
-          command: ["bundle", "exec", "script/delayed_job", "run"]
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              cd /usr/src/app
+              for f in database redis cache_store security domain file_store delayed_jobs; do
+                cp "config/$f.yml.cloud66" "config/$f.yml"
+              done
+              exec bundle exec script/delayed_job run
           envFrom:
             - configMapRef:
                 name: canvas-env
@@ -35,7 +49,7 @@ spec:
           livenessProbe:
             exec:
               command: ["/bin/bash", "-lc", "pgrep -f delayed_job >/dev/null"]
-            initialDelaySeconds: 60
+            initialDelaySeconds: 90
             periodSeconds: 30
             failureThreshold: 3
           resources:
@@ -46,15 +60,9 @@ spec:
               cpu: "2"
               memory: "3Gi"
           volumeMounts:
-            - { name: config, mountPath: /usr/src/app/config/database.yml, subPath: database.yml }
-            - { name: config, mountPath: /usr/src/app/config/redis.yml, subPath: redis.yml }
-            - { name: config, mountPath: /usr/src/app/config/cache_store.yml, subPath: cache_store.yml }
-            - { name: config, mountPath: /usr/src/app/config/security.yml, subPath: security.yml }
-            - { name: config, mountPath: /usr/src/app/config/amazon_s3.yml, subPath: amazon_s3.yml }
-            - { name: config, mountPath: /usr/src/app/config/file_store.yml, subPath: file_store.yml }
-            - { name: config, mountPath: /usr/src/app/config/domain.yml, subPath: domain.yml }
-            - { name: config, mountPath: /usr/src/app/config/outgoing_mail.yml, subPath: outgoing_mail.yml }
+            - name: files
+              mountPath: /usr/src/app/storage/files
       volumes:
-        - name: config
-          configMap:
-            name: canvas-config-files
+        - name: files
+          persistentVolumeClaim:
+            claimName: canvas-files

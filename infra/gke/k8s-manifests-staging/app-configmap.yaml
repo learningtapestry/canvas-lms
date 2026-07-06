@@ -4,12 +4,27 @@ metadata:
   name: canvas-env
   namespace: canvas-staging
 data:
+  # Non-secret env consumed by the cloud66 config templates. Secret values
+  # (POSTGRESQL_ADDRESS/PASSWORD, REDIS_ADDRESS, ENCRYPTION_KEY,
+  # JWT_ENCRYPTION_KEY) come from the `canvas-secrets` Secret.
   RAILS_ENV: production
   RACK_ENV: production
-  # Public hostname (also used by domain.yml). Replace with the real host.
+  NODE_ENV: production
+  # database.yml.cloud66
+  POSTGRESQL_PORT: "5432"
+  POSTGRESQL_DATABASE: canvas_production
+  POSTGRESQL_USERNAME: canvas
+  # redis.yml.cloud66
+  REDIS_PORT: "6379"
+  CANVAS_REDIS_DB: "0"
+  # domain.yml.cloud66 — replace with the real hostname
   CANVAS_DOMAIN: canvas-staging.example.com
-  # Rails/Puma
-  RAILS_LOG_TO_STDOUT: "1"
-  DB_POOL: "10"
-  WEB_CONCURRENCY: "2"
-  RAILS_MAX_THREADS: "5"
+  CANVAS_SSL: "true"
+  # security.yml.cloud66 (optional LTI issuer)
+  CANVAS_LTI_ISS: https://canvas.instructure.com
+  # first-deploy admin (db:initial_setup) — replace with a real address
+  CANVAS_LMS_ADMIN_EMAIL: admin@example.com
+  # file_store.yml.cloud66 — local storage on the canvas-files PVC
+  FILE_STORAGE_PATH_PREFIX: storage/files
+  # delayed_jobs.yml.cloud66
+  CANVAS_DELAYED_JOB_WORKERS: "2"

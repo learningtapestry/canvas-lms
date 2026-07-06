@@ -47,13 +47,6 @@ variable "db_user" {
   default = "canvas"
 }
 
-# --- GCS ---
-variable "attachments_bucket" {
-  description = "Globally-unique bucket for Canvas file attachments"
-  type        = string
-  default     = "canvas-attachments-staging"
-}
-
 variable "deletion_protection" {
   type    = bool
   default = true

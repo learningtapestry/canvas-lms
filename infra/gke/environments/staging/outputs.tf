@@ -15,8 +15,8 @@ output "cloudsql_private_ip" {
   value = module.cloudsql.private_ip
 }
 
-output "attachments_bucket" {
-  value = module.attachments_bucket.name
+output "redis_host" {
+  value = module.memorystore.host
 }
 
 output "app_service_account_email" {

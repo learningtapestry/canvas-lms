@@ -5,6 +5,10 @@ name: Build Canvas image
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: "Git ref (branch/tag/sha) to build"
+        required: true
+        default: cloud66-prod
       tag:
         description: "Image tag to push"
         required: true
@@ -23,7 +27,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # Build the running production code (cloud66-prod), not the branch the
+      # workflow was dispatched from.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       # Canvas' asset build is disk-hungry; reclaim ~10-15 GB on the runner.
       - name: Free up disk space
@@ -32,20 +40,6 @@ jobs:
             /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/.ghcup
           sudo docker image prune -af || true
           df -h /
-
-      - name: Set up Ruby (for the Dockerfile generator)
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.4"
-
-      - name: Generate production Dockerfile
-        run: |
-          gem install erubi --no-document
-          ruby build/dockerfile_writer.rb --env production \
-            --compose-file inst-cli/docker-compose/docker-compose.local.dev.yml \
-            --in build/Dockerfile.template --out Dockerfile.production
-          echo "----- generated Dockerfile.production -----"
-          cat Dockerfile.production
 
       - id: auth
         name: Authenticate to Google Cloud (WIF)
@@ -66,7 +60,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.production
+          file: Dockerfile.production # maintained in the repo, no generation needed
           push: true
           tags: ${{ env.IMAGE }}:${{ inputs.tag }}
+          build-args: |
+            POSTGRES_CLIENT=17
           provenance: false

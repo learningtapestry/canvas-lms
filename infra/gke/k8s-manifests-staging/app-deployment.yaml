@@ -6,14 +6,15 @@ metadata:
   labels:
     app: canvas-web
 spec:
-  replicas: 2
+  # Approach B: single replica sharing a ReadWriteOnce PD with the jobs pod.
+  replicas: 1
+  # Recreate (not RollingUpdate): a RWO disk can't attach to a new pod on
+  # another node while the old one holds it.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: canvas-web
-  strategy:
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
   template:
     metadata:
       labels:
@@ -22,13 +23,20 @@ spec:
       serviceAccountName: canvas-app
       containers:
         - name: canvas-web
-          # Production image (assets precompiled) — built + pushed by CI.
-          # The repo Dockerfile is dev-only; a prod image build is required.
           image: us-central1-docker.pkg.dev/propane-country-501515-c2/canvas/canvas-lms:staging
           imagePullPolicy: Always
-          # Run Puma directly on a non-privileged port (Autopilot is non-root),
-          # rather than the image's Passenger/nginx on :80.
-          command: ["bundle", "exec", "rails", "server", "-b", "0.0.0.0", "-p", "3000", "-e", "production"]
+          # Activate the cloud66 config templates (the deploy-hook equivalent),
+          # then run Puma. amazon_s3 / outgoing_mail are intentionally not
+          # copied -> local file storage, no SMTP.
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              cd /usr/src/app
+              for f in database redis cache_store security domain file_store delayed_jobs; do
+                cp "config/$f.yml.cloud66" "config/$f.yml"
+              done
+              exec bundle exec rails server -b 0.0.0.0 -p 3000 -e production
           ports:
             - containerPort: 3000
           envFrom:
@@ -40,14 +48,14 @@ spec:
             httpGet:
               path: /health_check
               port: 3000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 10
-            failureThreshold: 3
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /health_check
               port: 3000
-            initialDelaySeconds: 90
+            initialDelaySeconds: 150
             periodSeconds: 20
             failureThreshold: 3
           resources:
@@ -56,20 +64,14 @@ spec:
               memory: "1Gi"
             limits:
               cpu: "2"
-              memory: "2560Mi"
+              memory: "3Gi"
           volumeMounts:
-            - { name: config, mountPath: /usr/src/app/config/database.yml, subPath: database.yml }
-            - { name: config, mountPath: /usr/src/app/config/redis.yml, subPath: redis.yml }
-            - { name: config, mountPath: /usr/src/app/config/cache_store.yml, subPath: cache_store.yml }
-            - { name: config, mountPath: /usr/src/app/config/security.yml, subPath: security.yml }
-            - { name: config, mountPath: /usr/src/app/config/amazon_s3.yml, subPath: amazon_s3.yml }
-            - { name: config, mountPath: /usr/src/app/config/file_store.yml, subPath: file_store.yml }
-            - { name: config, mountPath: /usr/src/app/config/domain.yml, subPath: domain.yml }
-            - { name: config, mountPath: /usr/src/app/config/outgoing_mail.yml, subPath: outgoing_mail.yml }
+            - name: files
+              mountPath: /usr/src/app/storage/files
       volumes:
-        - name: config
-          configMap:
-            name: canvas-config-files
+        - name: files
+          persistentVolumeClaim:
+            claimName: canvas-files
 
 ---
 apiVersion: v1

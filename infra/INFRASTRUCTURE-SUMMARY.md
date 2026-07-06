@@ -10,26 +10,36 @@ operational detail.
   Postgres) hosting onto **Google Cloud / GKE**, starting lean with a single
   `staging` environment and managed data services. Prod follows later as a copy
   with larger tiers + HA.
-- **Origin of the object-storage need:** Canvas' attachment layer uses an S3
-  driver; on GCP this is served by **GCS via the S3-interoperability API**
-  (HMAC key), which is what replaces the "S3-compatible service" requirement.
+- **File storage:** the running app uses **local file storage** (confirmed with
+  the dev) — no object storage. On k8s this is a ReadWriteOnce Persistent Disk
+  shared by the single-replica web+jobs pods. (The earlier "S3-compatible
+  service" idea is set aside; object storage would be a future option.)
 - **Reference:** patterns (module + manifest layout, External Secrets,
   cert-manager, Workload Identity) were modelled on an existing EKS setup, then
   simplified for GKE. No content from that reference lives here.
 
 ## The application (what we're deploying)
 
-- **Canvas LMS** — large Rails 8 / Ruby 3.4 monolith.
-- **Web:** served by **Puma on :3000** (non-root, Autopilot-friendly) instead of
-  the base image's Passenger/nginx on :80.
-- **Workers:** **inst-jobs** (Instructure's `delayed_job`) + `switchman-inst-jobs`
-  (sharding), run via `script/delayed_job run`. **Not Sidekiq.**
-- **Data deps:** PostgreSQL (switchman sharding), Redis (cache + job locking),
-  object storage for attachments. **No Elasticsearch** (not required by core).
-- **Config:** file-driven (`config/*.yml`), injected as mounted YAML rendered
-  via ERB from env vars — not pure env config.
-- **Image:** the repo `Dockerfile` is **dev-only**; production needs a separate
-  build with precompiled assets (`yarn build`, `RAILS_ENV=production`).
+- **Canvas LMS** — large Rails 8 / Ruby 3.4 monolith. **We track the
+  `cloud66-prod` branch** — the exact code Cloud66 runs in production (has
+  `config/*.yml.cloud66` templates + `.cloud66/` deploy metadata).
+- **Web:** served by **Puma on :3000** (non-root, Autopilot-friendly).
+- **Workers:** **inst-jobs** (`delayed_job`) + `switchman-inst-jobs`, run via
+  `script/delayed_job run`. **Not Sidekiq.**
+- **Data deps:** PostgreSQL, Redis (cache + job locking), **local file storage**
+  for attachments (no buckets — confirmed with the dev). **No Elasticsearch.**
+- **Config (matches Cloud66):** env-var driven. The image ships
+  `config/*.yml.cloud66` templates; each pod's start command copies
+  `*.yml.cloud66 → *.yml` (the Cloud66 `after_checkout` hook), then boots.
+  `amazon_s3`/`outgoing_mail` are not copied → local storage, no SMTP.
+- **Real env var names** (from cloud66-prod): `POSTGRESQL_ADDRESS/PORT/DATABASE/
+  USERNAME/PASSWORD`, `REDIS_ADDRESS/PORT`, `CANVAS_REDIS_DB`, `ENCRYPTION_KEY`,
+  `JWT_ENCRYPTION_KEY`, `CANVAS_DOMAIN`, `CANVAS_LMS_ADMIN_EMAIL`,
+  `FILE_STORAGE_PATH_PREFIX`.
+- **Stack (cloud66 manifest):** Ruby 3.4.9, Node 20, Postgres 18.3, Redis 8.6.2.
+- **Image:** built from `cloud66-prod` using the repo's maintained
+  **`Dockerfile.production`** (runs `bundle install` + `canvas:compile_assets`).
+  The repo `Dockerfile` is dev-only.
 
 ## GCP project
 
@@ -51,11 +61,11 @@ operational detail.
 | Web | `canvas-web` Deployment (Puma :3000) + HPA (2–6) | Service maps 80→3000 |
 | Workers | `canvas-jobs` Deployment (`script/delayed_job run`, 2 replicas) | inst-jobs |
 | Migrate | `canvas-db-migrate` Job | `db:initial_setup` first run, then `db:migrate` |
-| Database | **Cloud SQL** for PostgreSQL 14, private IP | `db-custom-2-7680` staging |
-| Cache/jobs | **Memorystore** for Redis, auth + TLS | replaces self-hosted Redis |
-| Attachments | **GCS** bucket + **HMAC key** (S3-interop) | Canvas S3 driver → `storage.googleapis.com` |
-| Registry | **Artifact Registry** (Docker, immutable tags) | Canvas image |
-| Secrets | **Secret Manager** + External Secrets Operator | assembled by Terraform, synced into `canvas-secrets` |
+| Database | **Cloud SQL** for PostgreSQL **17**, private IP | `db-custom-2-7680` staging (prod runs 18.3) |
+| Cache/jobs | **Memorystore** for Redis, **AUTH disabled** | matches cloud66 `redis.yml` (plain redis://) |
+| Attachments | **Local storage** on a **ReadWriteOnce PD** (`canvas-files` PVC) | web+jobs single-replica, colocated (approach B); prod → Filestore/object storage |
+| Registry | **Artifact Registry** (Docker, immutable tags) | Canvas image (built from cloud66-prod) |
+| Secrets | **Secret Manager** + External Secrets Operator | `POSTGRESQL_*`, `REDIS_ADDRESS`, `ENCRYPTION_KEY`, `JWT_ENCRYPTION_KEY` |
 | Identity | **Workload Identity** + 3 GSAs (app, external-secrets, cert-manager) | keyless; HMAC is the one exception |
 | Ingress/TLS | **ingress-nginx** + cert-manager (Cloud DNS DNS01) | 10g upload limit for Canvas |
 
@@ -64,12 +74,12 @@ operational detail.
 - **Workload Identity** is the primary mechanism (GKE analogue of EKS IRSA):
   each Kubernetes ServiceAccount impersonates a least-privilege Google service
   account — no static keys. On Autopilot it's enabled by default.
-  - `canvas-app` → Cloud SQL client, GCS object admin (bucket-scoped),
-    Secret Manager accessor (secret-scoped).
+  - `canvas-app` → Cloud SQL client, Secret Manager accessor (secret-scoped).
   - `canvas-external-secrets` → Secret Manager accessor.
   - `canvas-cert-manager` → Cloud DNS admin.
-- **One exception:** Canvas' S3 attachment driver needs an access-key/secret, so
-  attachments use a **GCS HMAC key** (stored in Secret Manager), not keyless WI.
+  - `github-actions` → Artifact Registry writer (via Workload Identity
+    Federation, for the image-build workflow).
+- No static keys anywhere (local file storage removed the need for an HMAC key).
 
 ## Repository layout (all in this repo — nothing committed elsewhere)
 
@@ -94,8 +104,10 @@ Terraform `>= 1.5`). State: GCS backend (bucket TBD).
 2. **GKE Autopilot** — removes node-pool/autoscaler/CSI ops (team has k8s
    experience but no need to run nodes).
 3. **Managed data** — Cloud SQL + Memorystore instead of self-hosted pods.
-4. **GCS S3-interop** for attachments — smallest change to Canvas' storage layer.
-5. **Config as mounted YAML** — matches how Canvas actually reads config.
+4. **Local file storage** on a RWO PD (approach B) — matches current prod; cheap
+   for staging. Prod needs Filestore (RWX) or object storage.
+5. **Reuse the cloud66 config templates** — copy `*.yml.cloud66 → *.yml` at
+   start; matches exactly how the running app is configured.
 6. **Puma on a high port** — avoids privileged-port/root issues under Autopilot.
 
 ## Current status
@@ -108,11 +120,12 @@ Terraform `>= 1.5`). State: GCS backend (bucket TBD).
 
 ## Open items / to fill
 
-- Terraform **state bucket** (`backend.tf` placeholder) — create during bootstrap.
 - Real **hostname** (replacing `canvas-staging.example.com`) + cert-manager email.
-- **GCS S3-interop `endpoint`** must be honoured by Canvas' S3 client — validate
-  on the real image (may need a small patch or the native Fog-GCS path).
-- **Production Canvas image** with precompiled assets (CI build).
+- **Production Canvas image** built from `cloud66-prod` (GitHub Actions workflow).
+- First deploy: run `db:initial_setup` (needs `CANVAS_LMS_ADMIN_EMAIL`, maybe
+  admin password) before the app can serve.
+- Prod file storage: move off the single RWO PD to Filestore (RWX) or object
+  storage for HA/scale.
 - **Outbound email** relay (placeholder in `outgoing_mail.yml`).
 
 ## Bootstrap → apply flow

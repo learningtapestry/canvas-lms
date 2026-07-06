@@ -11,7 +11,5 @@ cluster_name = "canvas-gke"
 
 db_tier = "db-custom-2-7680" # 2 vCPU / 7.5 GB — bump for prod
 
-attachments_bucket = "canvas-attachments-staging"
-
 # Set false only in throwaway sandboxes.
 deletion_protection = true

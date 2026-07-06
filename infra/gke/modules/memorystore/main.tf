@@ -19,6 +19,8 @@ resource "google_redis_instance" "this" {
   authorized_network = var.network_id
   connect_mode       = "PRIVATE_SERVICE_ACCESS"
 
-  auth_enabled            = true
-  transit_encryption_mode = "SERVER_AUTHENTICATION"
+  # Canvas' cloud66 redis.yml uses a plain redis:// URL (no auth/TLS), so we
+  # match that on a private VPC.
+  auth_enabled            = var.auth_enabled
+  transit_encryption_mode = var.auth_enabled ? "SERVER_AUTHENTICATION" : "DISABLED"
 }

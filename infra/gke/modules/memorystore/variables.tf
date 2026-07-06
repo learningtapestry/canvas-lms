@@ -25,3 +25,9 @@ variable "redis_version" {
   type    = string
   default = "REDIS_7_2"
 }
+
+variable "auth_enabled" {
+  description = "Enable Redis AUTH + TLS (Canvas cloud66 config expects it off)"
+  type        = bool
+  default     = false
+}

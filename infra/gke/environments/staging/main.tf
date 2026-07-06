@@ -37,9 +37,14 @@ resource "random_password" "db" {
   special = false
 }
 
-# Canvas security.yml encryption_key (must be >= 20 chars).
+# Canvas security.yml keys (ENCRYPTION_KEY 128, JWT_ENCRYPTION_KEY 64).
 resource "random_password" "encryption_key" {
-  length  = 48
+  length  = 128
+  special = false
+}
+
+resource "random_password" "jwt_encryption_key" {
+  length  = 64
   special = false
 }
 
@@ -48,6 +53,7 @@ module "cloudsql" {
   name                = local.name
   region              = var.region
   network_id          = module.network.network_id
+  database_version    = "POSTGRES_17" # prod runs 18.x; 17 is Cloud SQL's max
   tier                = var.db_tier
   db_name             = var.db_name
   db_user             = var.db_user
@@ -58,22 +64,20 @@ module "cloudsql" {
 }
 
 module "memorystore" {
-  source     = "../../modules/memorystore"
-  name       = local.name
-  region     = var.region
-  network_id = module.network.network_id
+  source       = "../../modules/memorystore"
+  name         = local.name
+  region       = var.region
+  network_id   = module.network.network_id
+  auth_enabled = false # match Canvas cloud66 redis.yml (plain redis://)
 
   depends_on = [module.network]
 }
 
 # ------------------------------------------------------------------------------
-# Object storage + image registry
+# Image registry
+# (No object storage — Canvas uses local file storage on a Persistent Disk;
+#  see the canvas-files PVC in k8s-manifests-staging.)
 # ------------------------------------------------------------------------------
-module "attachments_bucket" {
-  source = "../../modules/gcs_bucket"
-  name   = var.attachments_bucket
-}
-
 module "artifact_registry" {
   source        = "../../modules/artifact_registry"
   repository_id = "canvas"
@@ -119,20 +123,10 @@ module "cert_manager_sa" {
   depends_on = [module.gke]
 }
 
-# Attachment storage: grant the app object access, then mint an HMAC key so
-# Canvas' S3 driver can talk to GCS via the S3-interoperability API.
-resource "google_storage_bucket_iam_member" "app_attachments" {
-  bucket = module.attachments_bucket.name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${module.app_sa.email}"
-}
-
-resource "google_storage_hmac_key" "app" {
-  service_account_email = module.app_sa.email
-}
-
 # ------------------------------------------------------------------------------
-# Application secret (assembled from managed infra; read by External Secrets)
+# Application secret (assembled from managed infra; read by External Secrets).
+# Keys match the env vars Canvas' cloud66 config templates expect. Non-secret
+# values (DB name/user/port, domain, admin email) live in the ConfigMap.
 # ------------------------------------------------------------------------------
 resource "google_secret_manager_secret" "app" {
   secret_id = local.app_secret_name
@@ -144,20 +138,14 @@ resource "google_secret_manager_secret" "app" {
 resource "google_secret_manager_secret_version" "app" {
   secret = google_secret_manager_secret.app.id
   secret_data = jsonencode({
-    # database.yml
-    DB_HOST     = module.cloudsql.private_ip
-    DB_NAME     = var.db_name
-    DB_USERNAME = var.db_user
-    DB_PASSWORD = random_password.db.result
-    # security.yml
-    ENCRYPTION_KEY = random_password.encryption_key.result
-    # redis.yml / cache_store.yml
-    REDIS_URL = "redis://:${module.memorystore.auth_string}@${module.memorystore.host}:${module.memorystore.port}/0"
-    # amazon_s3.yml (GCS via S3 interop)
-    GCS_BUCKET            = module.attachments_bucket.name
-    GCS_HMAC_ACCESS_KEY   = google_storage_hmac_key.app.access_id
-    GCS_HMAC_SECRET_KEY   = google_storage_hmac_key.app.secret
-    GCS_S3_INTEROP_REGION = var.region
+    # database.yml.cloud66
+    POSTGRESQL_ADDRESS  = module.cloudsql.private_ip
+    POSTGRESQL_PASSWORD = random_password.db.result
+    # redis.yml.cloud66 (AUTH disabled -> host only)
+    REDIS_ADDRESS = module.memorystore.host
+    # security.yml.cloud66
+    ENCRYPTION_KEY     = random_password.encryption_key.result
+    JWT_ENCRYPTION_KEY = random_password.jwt_encryption_key.result
   })
 }
 
