@@ -1,0 +1,180 @@
+name: Generate Skooner token
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "Token duration"
+        type: choice
+        required: true
+        default: 2h
+        options:
+          - 30m
+          - 2h
+          - 6h
+      whitelist_source_range:
+        description: "Optional NGINX whitelist-source-range (CIDR(s), comma-separated)"
+        type: string
+        required: false
+      role:
+        description: "Access level for skooner-sa"
+        type: choice
+        required: true
+        default: view
+        options:
+          - view
+          - developer
+          - cluster-admin
+
+permissions:
+  contents: read
+  id-token: write # required for the WIF OIDC token
+
+env:
+  GCP_PROJECT_ID: propane-country-501515-c2
+  GKE_CLUSTER: canvas-gke
+  GKE_LOCATION: us-central1
+  WIF_PROVIDER: projects/471927261241/locations/global/workloadIdentityPools/github-actions/providers/github
+  WIF_SERVICE_ACCOUNT: github-actions-skooner@propane-country-501515-c2.iam.gserviceaccount.com
+  SA_NAMESPACE: skooner
+  SA_NAME: skooner-sa
+  # Namespace(s) the "developer" role gets edit access to.
+  DEV_EDIT_NAMESPACE: canvas-staging
+
+jobs:
+  token:
+    if: ${{ github.repository_owner == 'learningtapestry' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Get GKE credentials (via Connect Gateway)
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_LOCATION }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          use_connect_gateway: "true"
+
+      - name: Ensure RBAC for skooner-sa
+        id: rbac
+        env:
+          ROLE: ${{ inputs.role }}
+        run: |
+          NS="${SA_NAMESPACE}"
+          SA="${SA_NAME}"
+          echo "Requested role: ${ROLE}"
+          if [ "${ROLE}" = "cluster-admin" ]; then
+            kubectl create clusterrolebinding "${SA}" \
+              --clusterrole="cluster-admin" \
+              --serviceaccount="${NS}:${SA}" \
+              --dry-run=client -o yaml | kubectl apply --validate=false -f -
+            echo "binding_kind=cluster-admin" >> "$GITHUB_OUTPUT"
+            echo "binding_namespace=cluster-wide" >> "$GITHUB_OUTPUT"
+          elif [ "${ROLE}" = "developer" ]; then
+            # Cluster-wide read-only via view
+            kubectl create clusterrolebinding "${SA}-developer-view" \
+              --clusterrole="view" \
+              --serviceaccount="${NS}:${SA}" \
+              --dry-run=client -o yaml | kubectl apply --validate=false -f -
+            # Namespaced edit in the app namespace
+            kubectl -n "${DEV_EDIT_NAMESPACE}" create rolebinding "${SA}-developer-edit" \
+              --clusterrole="edit" \
+              --serviceaccount="${NS}:${SA}" \
+              --dry-run=client -o yaml | kubectl apply --validate=false -f -
+            # Ensure no lingering admin CRB remains
+            kubectl delete clusterrolebinding "${SA}" --ignore-not-found
+            echo "binding_kind=developer" >> "$GITHUB_OUTPUT"
+            echo "binding_namespace=cluster-wide(view),${DEV_EDIT_NAMESPACE}(edit)" >> "$GITHUB_OUTPUT"
+          else
+            # view-only: strip admin + developer bindings
+            kubectl delete clusterrolebinding "${SA}" --ignore-not-found
+            kubectl delete clusterrolebinding "${SA}-developer-view" --ignore-not-found || true
+            kubectl -n "${DEV_EDIT_NAMESPACE}" delete rolebinding "${SA}-developer-edit" --ignore-not-found || true
+            # Grant cluster-wide read-only
+            kubectl create clusterrolebinding "${SA}-view" \
+              --clusterrole="view" \
+              --serviceaccount="${NS}:${SA}" \
+              --dry-run=client -o yaml | kubectl apply --validate=false -f -
+            echo "binding_kind=view-only" >> "$GITHUB_OUTPUT"
+            echo "binding_namespace=cluster-wide" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update Skooner Ingress whitelist (optional)
+        if: ${{ inputs.whitelist_source_range != '' }}
+        env:
+          WHITELIST: ${{ inputs.whitelist_source_range }}
+        run: |
+          echo "Setting whitelist-source-range to: ${WHITELIST}"
+          kubectl -n "${SA_NAMESPACE}" annotate ingress skooner-ingress \
+            nginx.ingress.kubernetes.io/whitelist-source-range="${WHITELIST}" --overwrite
+
+      - name: Create Skooner token
+        id: tok
+        env:
+          DURATION: ${{ inputs.duration }}
+        run: |
+          echo "Creating token for SA ${SA_NAMESPACE}/${SA_NAME} (duration ${DURATION})"
+          TOKEN=$(kubectl -n "${SA_NAMESPACE}" create token "${SA_NAME}" --duration="${DURATION}")
+          # Do not echo the token to logs; pass as a masked output only
+          echo "::add-mask::${TOKEN}"
+          echo "token=${TOKEN}" >> "$GITHUB_OUTPUT"
+
+      - name: Send token to Slack
+        if: ${{ always() && steps.tok.outputs.token != '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ACTOR: ${{ github.actor }}
+          DURATION: ${{ inputs.duration }}
+          ROLE: ${{ inputs.role }}
+          WHITELIST: ${{ inputs.whitelist_source_range }}
+          BINDING_KIND: ${{ steps.rbac.outputs.binding_kind }}
+          BINDING_NS: ${{ steps.rbac.outputs.binding_namespace }}
+          TOKEN: ${{ steps.tok.outputs.token }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL not set; skipping notification";
+            exit 0;
+          fi
+          payload=$(jq -nc \
+            --arg repo "$REPO" \
+            --arg run "$RUN_URL" \
+            --arg actor "$ACTOR" \
+            --arg duration "$DURATION" \
+            --arg role "${ROLE:-view}" \
+            --arg ns "$BINDING_NS" \
+            --arg wl "${WHITELIST:-}" \
+            --arg token "$TOKEN" \
+            '
+            {
+              text: "Skooner token generated",
+              blocks: [
+                { "type": "header", "text": { "type": "plain_text", "text": "Skooner token" } },
+                { "type": "section", "fields": [
+                    {"type":"mrkdwn", "text": "*Requested by:*\n\($actor)"},
+                    {"type":"mrkdwn", "text": "*Duration:*\n\($duration)"},
+                    {"type":"mrkdwn", "text": "*Role:*\n\($role)"},
+                    {"type":"mrkdwn", "text": "*Namespace:*\n\($ns)"}
+                  ]
+                },
+                { "type": "section", "fields": [
+                    {"type":"mrkdwn", "text": "*Whitelist:*\n\($wl)"}
+                  ]
+                },
+                { "type": "section", "text": { "type": "mrkdwn", "text": "*Token:*\n```\($token)```" } },
+                { "type": "context", "elements": [
+                    {"type":"mrkdwn", "text": "<\($run)|View run>"},
+                    {"type":"mrkdwn", "text": $repo},
+                    {"type":"mrkdwn", "text": "<https://skooner.35.222.47.79.nip.io/#!workload|Open Skooner>"}
+                  ]
+                }
+              ]
+            }
+            ')
+          curl -sS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" || true
