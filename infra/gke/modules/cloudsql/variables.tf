@@ -47,6 +47,13 @@ variable "ssl_mode" {
   default = "ENCRYPTED_ONLY"
 }
 
+# PITR adds continuous transaction-log storage. Keep on for prod; off for
+# cost-sensitive staging (daily backups still cover recovery).
+variable "point_in_time_recovery" {
+  type    = bool
+  default = true
+}
+
 variable "db_name" {
   type = string
 }

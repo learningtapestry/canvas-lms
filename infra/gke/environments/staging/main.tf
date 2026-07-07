@@ -68,6 +68,9 @@ module "cloudsql" {
   db_user             = var.db_user
   db_password         = random_password.db.result
   deletion_protection = var.deletion_protection
+  # Staging: PITR off to save transaction-log storage (daily backups kept;
+  # migrated data is reproducible). Prod should set this back to true.
+  point_in_time_recovery = false
 
   depends_on = [module.network]
 }

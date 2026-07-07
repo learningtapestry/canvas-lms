@@ -39,7 +39,7 @@ resource "google_sql_database_instance" "this" {
 
     backup_configuration {
       enabled                        = true
-      point_in_time_recovery_enabled = true
+      point_in_time_recovery_enabled = var.point_in_time_recovery
       start_time                     = "03:00"
     }
 

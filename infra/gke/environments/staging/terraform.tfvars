@@ -12,7 +12,7 @@ master_authorized_networks = [
   { cidr_block = "148.227.69.243/32", display_name = "operator" },
 ]
 
-db_tier = "db-custom-2-7680" # 2 vCPU / 7.5 GB — bump for prod
+db_tier = "db-custom-1-3840" # 1 vCPU / 3.75 GB — staging (bump for prod)
 
 # Set false only in throwaway sandboxes.
 deletion_protection = true
