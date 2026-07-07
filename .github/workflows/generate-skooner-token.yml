@@ -177,4 +177,9 @@ jobs:
               ]
             }
             ')
-          curl -sS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" || true
+          # Strip any stray whitespace/newline the secret may carry (curl
+          # rejects a URL with an embedded newline: "Malformed input").
+          WEBHOOK="$(printf '%s' "$SLACK_WEBHOOK_URL" | tr -d '[:space:]')"
+          if ! curl -sS -X POST -H 'Content-type: application/json' --data "$payload" "$WEBHOOK"; then
+            echo "::warning::Slack notification failed (check the SLACK_WEBHOOK_URL secret)"
+          fi
