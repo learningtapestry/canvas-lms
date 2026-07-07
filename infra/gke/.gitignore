@@ -13,3 +13,10 @@ override.tf.json
 terraform.rc
 # Keep .terraform.lock.hcl committed (provider pinning)
 !.terraform.lock.hcl
+
+# Secret-bearing tfvars must never be committed — pass secrets via TF_VAR_*.
+# (the committed terraform.tfvars holds non-secret config only)
+*.auto.tfvars
+*.auto.tfvars.json
+secrets.tfvars
+*.secret.tfvars

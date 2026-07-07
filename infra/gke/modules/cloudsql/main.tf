@@ -34,6 +34,7 @@ resource "google_sql_database_instance" "this" {
     ip_configuration {
       ipv4_enabled    = false
       private_network = var.network_id
+      ssl_mode        = var.ssl_mode
     }
 
     backup_configuration {

@@ -39,6 +39,14 @@ variable "disk_size" {
   default = 50
 }
 
+# ENCRYPTED_ONLY rejects unencrypted connections (defense-in-depth on top of
+# the private IP). Canvas sets no explicit sslmode, so libpq defaults to
+# 'prefer' and still negotiates SSL — connections keep working, now encrypted.
+variable "ssl_mode" {
+  type    = string
+  default = "ENCRYPTED_ONLY"
+}
+
 variable "db_name" {
   type = string
 }
