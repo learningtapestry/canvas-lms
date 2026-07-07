@@ -1,0 +1,29 @@
+# cert-manager Helm values (staging) — chart jetstack/cert-manager v1.20.3
+# Reproduces the live release. See README.md in this dir for install commands.
+#
+# Resources: Autopilot injects 0.5 vCPU / 2Gi PER POD when a chart sets none.
+# These controllers are near-idle, so we pin low BURSTABLE requests (requests <
+# limits) — Autopilot then bills the 50m/128Mi request and lets pods burst to the
+# limit during cert issuance / reconciliation. Cuts this add-on ~$70 -> ~$6/mo.
+crds:
+  enabled: true
+
+# Workload Identity: impersonate the least-privilege GSA (Cloud DNS admin for
+# DNS01). KSA -> GSA binding is created by Terraform (module.cert_manager_sa).
+serviceAccount:
+  annotations:
+    iam.gke.io/gcp-service-account: canvas-cert-manager@propane-country-501515-c2.iam.gserviceaccount.com
+
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+
+webhook:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+cainjector:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
