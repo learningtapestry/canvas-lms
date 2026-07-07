@@ -64,10 +64,11 @@ operational detail.
 | Layer | GCP building block | Notes |
 |-------|--------------------|-------|
 | Network | Custom VPC + subnet (VPC-native ranges), Cloud NAT, Private Service Access | Private nodes/data; egress via NAT |
-| Compute | **GKE Autopilot** | Managed nodes/scaling; Workload Identity on by default |
+| Compute | **GKE Autopilot** | Managed nodes/scaling; WI on by default; **control-plane public endpoint restricted to authorized networks** |
 | Web | `canvas-web` Deployment (Passenger :3000), single replica, `Recreate` | Service maps 80→3000; colocated with jobs (RWO PD) |
+| Workers | `canvas-jobs` Deployment (`script/delayed_job run`), single replica | inst-jobs; colocated with web on the RWO PD |
 | Migrate | `canvas-db-migrate` Job | `db:initial_setup` first run, then `db:migrate` |
-| Database | **Cloud SQL** for PostgreSQL **18**, private IP, zone-pinned `us-central1-f` | `db-custom-2-7680` staging (matches prod 18.4 for clean dump/restore) |
+| Database | **Cloud SQL** for PostgreSQL **18**, private IP, zone-pinned `us-central1-f`, **SSL `ENCRYPTED_ONLY`** | `db-custom-2-7680` staging (matches prod 18.4 for clean dump/restore) |
 | Cache/jobs | **Memorystore** for Redis, **AUTH disabled** | matches cloud66 `redis.yml` (plain redis://) |
 | Attachments | **Local storage** on a **ReadWriteOnce PD** (`canvas-files` PVC) | web+jobs single-replica, colocated (approach B); prod → Filestore/object storage |
 | Registry | **Artifact Registry** (Docker) | Canvas image (built from cloud66-prod) |
@@ -102,7 +103,7 @@ operational detail.
 
 ```
 infra/
-├── INFRASTRUCTURE-SUMMARY.md   # this file
+├── README.md                   # this file (top-level infra overview)
 └── gke/
     ├── README.md
     ├── environments/staging/   # Terraform root (providers, backend, main, tfvars)
@@ -112,7 +113,8 @@ infra/
 ```
 
 Terraform modules are app-agnostic and version-pinned (`google ~> 6.0`,
-Terraform `>= 1.5`). State: GCS backend (bucket TBD).
+Terraform `>= 1.5`). State: GCS backend, bucket
+`propane-country-501515-c2-tf-state`.
 
 ## Key decisions
 
@@ -125,7 +127,8 @@ Terraform `>= 1.5`). State: GCS backend (bucket TBD).
    for staging. Prod needs Filestore (RWX) or object storage.
 5. **Reuse the cloud66 config templates** — copy `*.yml.cloud66 → *.yml` at
    start; matches exactly how the running app is configured.
-6. **Puma on a high port** — avoids privileged-port/root issues under Autopilot.
+6. **Passenger on a high port** — required (Canvas disables `public_file_server`)
+   and avoids privileged-port/root issues under Autopilot.
 
 ## Current status
 
@@ -135,6 +138,10 @@ Terraform `>= 1.5`). State: GCS backend (bucket TBD).
   14 GB / 2727 media files onto the `canvas-files` PVC (byte-for-byte match) + full
   PG dump (6 users / 20 courses / 9700 attachment rows). Temp bucket + HMAC key + SA
   since deleted.
+- **Secret Manager reconciled** — the app secret (version 5) holds the prod crypto
+  keys, Terraform-managed via `TF_VAR_*` (not committed).
+- **Hardening applied** — GKE control-plane locked to the operator's authorized
+  network; Cloud SQL enforces `ENCRYPTED_ONLY`.
 - **Branch:** `infrastructure` (in this repo), pushed to `origin`.
 - Temp access: `https://35.222.47.79.nip.io` (self-signed cert).
 - **Admin login:** `https://35.222.47.79.nip.io/login` — email
@@ -144,11 +151,11 @@ Terraform `>= 1.5`). State: GCS backend (bucket TBD).
 
 ## Open items / to fill
 
-- Run `terraform apply` (with `TF_VAR_*` keys) to **reconcile the secret version**
-  to the prod crypto keys.
-- **Admin login** — prod passwords unknown; create a fresh admin.
+- **Replace the control-plane authorized network** — it currently allows a single
+  operator IP (`/32`); swap for a stable VPN/office CIDR in `terraform.tfvars`.
 - Real **hostname** + **trusted cert** (cert-manager webhook x509 CA issue, or a
-  real domain + Let's Encrypt).
+  real domain + Let's Encrypt) to replace the self-signed nip.io cert.
 - Prod file storage: move off the single RWO PD to Filestore (RWX) or object
   storage for HA/scale.
 - **Outbound email** relay (placeholder in `outgoing_mail.yml`).
+- Open the PR for the `infrastructure` branch.
