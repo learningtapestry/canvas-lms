@@ -168,11 +168,12 @@ resource "google_secret_manager_secret_version" "app" {
     POSTGRESQL_PASSWORD = random_password.db.result
     # redis.yml.cloud66 (AUTH disabled -> host only)
     REDIS_ADDRESS = module.memorystore.host
-    # security.yml.cloud66
-    ENCRYPTION_KEY     = random_password.encryption_key.result
-    JWT_ENCRYPTION_KEY = random_password.jwt_encryption_key.result
+    # security.yml.cloud66 — reuse the source keys for migrated data (via
+    # TF_VAR_*), otherwise a freshly generated key. See variables.tf.
+    ENCRYPTION_KEY     = coalesce(var.encryption_key, random_password.encryption_key.result)
+    JWT_ENCRYPTION_KEY = coalesce(var.jwt_encryption_key, random_password.jwt_encryption_key.result)
     # Rails cookie signing (Cloud66 auto-provides this; we must too)
-    SECRET_KEY_BASE = random_password.secret_key_base.result
+    SECRET_KEY_BASE = coalesce(var.secret_key_base, random_password.secret_key_base.result)
   })
 }
 

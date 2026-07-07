@@ -63,3 +63,32 @@ variable "github_repository" {
   type        = string
   default     = "learningtapestry/canvas-lms"
 }
+
+# --- Canvas crypto keys ---
+# For a FRESH install leave these null -> Terraform generates random keys.
+# When importing EXISTING data (e.g. a prod migration), the stored data is
+# encrypted with the source instance's keys, so Canvas must reuse them or it
+# can't decrypt. Supply them out-of-band and NEVER commit the values:
+#   export TF_VAR_encryption_key='...'
+#   export TF_VAR_jwt_encryption_key='...'
+#   export TF_VAR_secret_key_base='...'
+variable "encryption_key" {
+  description = "Canvas ENCRYPTION_KEY (>=20 chars). null = generate. Set via TF_VAR for migrated data; do NOT commit."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "jwt_encryption_key" {
+  description = "Canvas JWT_ENCRYPTION_KEY. null = generate. Set via TF_VAR for migrated data; do NOT commit."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "secret_key_base" {
+  description = "Rails SECRET_KEY_BASE (session cookie signing). null = generate. Set via TF_VAR to keep sessions stable across applies; do NOT commit."
+  type        = string
+  default     = null
+  sensitive   = true
+}

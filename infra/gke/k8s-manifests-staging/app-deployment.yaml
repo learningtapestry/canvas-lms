@@ -42,7 +42,7 @@ spec:
               for f in database redis cache_store security domain file_store delayed_jobs; do
                 cp "config/$f.yml.cloud66" "config/$f.yml"
               done
-              exec passenger start -p 3000 -e production --max-pool-size 3 --min-instances 1
+              exec passenger start -p 3000 -e production --max-pool-size 3 --min-instances 1 --start-timeout 300
           ports:
             - containerPort: 3000
           envFrom:

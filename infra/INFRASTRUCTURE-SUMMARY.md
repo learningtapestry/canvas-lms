@@ -23,9 +23,16 @@ operational detail.
 - **Canvas LMS** — large Rails 8 / Ruby 3.4 monolith. **We track the
   `cloud66-prod` branch** — the exact code Cloud66 runs in production (has
   `config/*.yml.cloud66` templates + `.cloud66/` deploy metadata).
-- **Web:** served by **Puma on :3000** (non-root, Autopilot-friendly).
+- **Web:** served by **Passenger on :3000** (non-root, Autopilot-friendly). NOT
+  `rails server`/Puma — Canvas sets `public_file_server.enabled=false`, so it needs
+  Passenger/nginx to serve `public/dist` (else assets 404). Started with
+  `--start-timeout 300` (the 90s default is too short for the preloader).
 - **Workers:** **inst-jobs** (`delayed_job`) + `switchman-inst-jobs`, run via
   `script/delayed_job run`. **Not Sidekiq.**
+- **HTTPS is mandatory:** Canvas hardcodes `config.force_ssl=true`, so the session
+  cookie is `secure` — over plain HTTP login fails with CSRF 400. TLS terminates at
+  the ingress. `SECRET_KEY_BASE` is also required (Cloud66 auto-injects it; on GKE
+  Terraform supplies it).
 - **Data deps:** PostgreSQL, Redis (cache + job locking), **local file storage**
   for attachments (no buckets — confirmed with the dev). **No Elasticsearch.**
 - **Config (matches Cloud66):** env-var driven. The image ships
@@ -58,16 +65,15 @@ operational detail.
 |-------|--------------------|-------|
 | Network | Custom VPC + subnet (VPC-native ranges), Cloud NAT, Private Service Access | Private nodes/data; egress via NAT |
 | Compute | **GKE Autopilot** | Managed nodes/scaling; Workload Identity on by default |
-| Web | `canvas-web` Deployment (Puma :3000) + HPA (2–6) | Service maps 80→3000 |
-| Workers | `canvas-jobs` Deployment (`script/delayed_job run`, 2 replicas) | inst-jobs |
+| Web | `canvas-web` Deployment (Passenger :3000), single replica, `Recreate` | Service maps 80→3000; colocated with jobs (RWO PD) |
 | Migrate | `canvas-db-migrate` Job | `db:initial_setup` first run, then `db:migrate` |
-| Database | **Cloud SQL** for PostgreSQL **17**, private IP | `db-custom-2-7680` staging (prod runs 18.3) |
+| Database | **Cloud SQL** for PostgreSQL **18**, private IP, zone-pinned `us-central1-f` | `db-custom-2-7680` staging (matches prod 18.4 for clean dump/restore) |
 | Cache/jobs | **Memorystore** for Redis, **AUTH disabled** | matches cloud66 `redis.yml` (plain redis://) |
 | Attachments | **Local storage** on a **ReadWriteOnce PD** (`canvas-files` PVC) | web+jobs single-replica, colocated (approach B); prod → Filestore/object storage |
-| Registry | **Artifact Registry** (Docker, immutable tags) | Canvas image (built from cloud66-prod) |
-| Secrets | **Secret Manager** + External Secrets Operator | `POSTGRESQL_*`, `REDIS_ADDRESS`, `ENCRYPTION_KEY`, `JWT_ENCRYPTION_KEY` |
-| Identity | **Workload Identity** + 3 GSAs (app, external-secrets, cert-manager) | keyless; HMAC is the one exception |
-| Ingress/TLS | **ingress-nginx** + cert-manager (Cloud DNS DNS01) | 10g upload limit for Canvas |
+| Registry | **Artifact Registry** (Docker) | Canvas image (built from cloud66-prod) |
+| Secrets | **Secret Manager** + External Secrets Operator | `POSTGRESQL_*`, `REDIS_ADDRESS`, `ENCRYPTION_KEY`, `JWT_ENCRYPTION_KEY`, `SECRET_KEY_BASE` |
+| Identity | **Workload Identity** + 3 GSAs (app, external-secrets, cert-manager) | fully keyless (no static SA keys) |
+| Ingress/TLS | **ingress-nginx** + cert-manager (Cloud DNS DNS01) | LB = GCP regional external passthrough Network LB (L4) @ 35.222.47.79; 10g upload limit |
 
 ## Authentication model
 
@@ -79,7 +85,18 @@ operational detail.
   - `canvas-cert-manager` → Cloud DNS admin.
   - `github-actions` → Artifact Registry writer (via Workload Identity
     Federation, for the image-build workflow).
-- No static keys anywhere (local file storage removed the need for an HMAC key).
+- **No static keys anywhere.** Local file storage removes the need for any object-
+  storage credential. (A temp HMAC key + SA existed only for the one-off data
+  migration and have been deleted.)
+
+## Crypto keys (ENCRYPTION_KEY / JWT_ENCRYPTION_KEY / SECRET_KEY_BASE)
+
+- Terraform generates random keys for a **fresh** install. When importing existing
+  data (the prod migration), the data is encrypted with the source instance's keys,
+  so Canvas must reuse them — supply out-of-band and **never commit**:
+  `export TF_VAR_encryption_key=… TF_VAR_jwt_encryption_key=… TF_VAR_secret_key_base=…`
+  then `apply`. `coalesce(var.x, random_password.x.result)` picks the override if set.
+- After swapping keys against existing data, run `db:reset_encryption_key_hash`.
 
 ## Repository layout (all in this repo — nothing committed elsewhere)
 
@@ -90,7 +107,7 @@ infra/
     ├── README.md
     ├── environments/staging/   # Terraform root (providers, backend, main, tfvars)
     ├── modules/                # network, gke_cluster, cloudsql, memorystore,
-    │                           # gcs_bucket, artifact_registry, service_account
+    │                           # artifact_registry, service_account
     └── k8s-manifests-staging/  # web, jobs, migrate, ingress, ESO, cert-manager
 ```
 
@@ -112,24 +129,22 @@ Terraform `>= 1.5`). State: GCS backend (bucket TBD).
 
 ## Current status
 
-- **Done:** Terraform + manifests scaffolded and validated; project wired in;
-  GCP APIs enabled; project inspected (empty, billing on).
-- **Branch:** `infrastructure` (in this repo). Commits are local — push pending
-  `arielr-lt` write access to `learningtapestry/canvas-lms`.
-- **Not yet applied:** no GCP resources created beyond enabling APIs.
+- **DEPLOYED AND RUNNING**, serving **real migrated production data**. Terraform
+  applied; Helm add-ons installed; image built from `cloud66-prod`; manifests applied.
+- **Data migrated** from the prod EC2 (`18.234.235.110`) via a temp GCS bucket:
+  14 GB / 2727 media files onto the `canvas-files` PVC (byte-for-byte match) + full
+  PG dump (6 users / 20 courses / 9700 attachment rows). Temp bucket + HMAC key + SA
+  since deleted.
+- **Branch:** `infrastructure` (in this repo), pushed to `origin`.
+- Temp access: `https://35.222.47.79.nip.io` (self-signed cert).
 
 ## Open items / to fill
 
-- Real **hostname** (replacing `canvas-staging.example.com`) + cert-manager email.
-- **Production Canvas image** built from `cloud66-prod` (GitHub Actions workflow).
-- First deploy: run `db:initial_setup` (needs `CANVAS_LMS_ADMIN_EMAIL`, maybe
-  admin password) before the app can serve.
+- Run `terraform apply` (with `TF_VAR_*` keys) to **reconcile the secret version**
+  to the prod crypto keys.
+- **Admin login** — prod passwords unknown; create a fresh admin.
+- Real **hostname** + **trusted cert** (cert-manager webhook x509 CA issue, or a
+  real domain + Let's Encrypt).
 - Prod file storage: move off the single RWO PD to Filestore (RWX) or object
   storage for HA/scale.
 - **Outbound email** relay (placeholder in `outgoing_mail.yml`).
-
-## Bootstrap → apply flow
-
-1. Enable APIs (done). 2. Create GCS state bucket, set in `backend.tf`.
-3. `terraform plan` (review) → `apply`. 4. Install Helm add-ons (ingress-nginx,
-cert-manager, external-secrets). 5. Build/push prod image. 6. Apply manifests.
