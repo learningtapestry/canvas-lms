@@ -1,0 +1,102 @@
+name: Update Skooner Ingress IP Whitelist
+
+on:
+  workflow_dispatch:
+    inputs:
+      ip:
+        description: "Your current IP address (without /32)"
+        type: string
+        required: true
+      label:
+        description: "Label for this IP (e.g. 'Ariel home')"
+        type: string
+        required: false
+        default: ""
+      replace:
+        description: "Replace the whole whitelist with just this IP (instead of appending)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  id-token: write # required for the WIF OIDC token
+
+env:
+  GCP_PROJECT_ID: propane-country-501515-c2
+  GKE_CLUSTER: canvas-gke
+  GKE_LOCATION: us-central1
+  WIF_PROVIDER: projects/471927261241/locations/global/workloadIdentityPools/github-actions/providers/github
+  WIF_SERVICE_ACCOUNT: github-actions-skooner@propane-country-501515-c2.iam.gserviceaccount.com
+  NAMESPACE: skooner
+  INGRESS_NAME: skooner-ingress
+
+jobs:
+  update-whitelist:
+    if: ${{ github.repository_owner == 'learningtapestry' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Get GKE credentials (via Connect Gateway)
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_LOCATION }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          use_connect_gateway: "true"
+
+      - name: Add IP to whitelist
+        run: |
+          NEW_IP="${{ inputs.ip }}/32"
+
+          if [ "${{ inputs.replace }}" = "true" ]; then
+            UPDATED="${NEW_IP}"
+          else
+            CURRENT=$(kubectl get ingress "${INGRESS_NAME}" \
+              -n "${NAMESPACE}" \
+              -o jsonpath='{.metadata.annotations.nginx\.ingress\.kubernetes\.io/whitelist-source-range}')
+            echo "Current whitelist: ${CURRENT:-<none>}"
+
+            if echo "$CURRENT" | grep -qF "$NEW_IP"; then
+              echo "IP $NEW_IP is already in the whitelist, nothing to do."
+              exit 0
+            fi
+            if [ -n "$CURRENT" ]; then
+              UPDATED="${CURRENT},${NEW_IP}"
+            else
+              UPDATED="${NEW_IP}"
+            fi
+          fi
+
+          kubectl annotate ingress "${INGRESS_NAME}" \
+            -n "${NAMESPACE}" \
+            --overwrite \
+            "nginx.ingress.kubernetes.io/whitelist-source-range=${UPDATED}"
+
+          echo "Updated whitelist: $UPDATED"
+          if [ -n "${{ inputs.label }}" ]; then
+            echo "Label: ${{ inputs.label }}"
+          fi
+
+      - name: Notify Slack
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL not set; skipping notification"
+            exit 0
+          fi
+          STATUS="${{ job.status }}"
+          EMOJI=✅; [ "$STATUS" = "failure" ] && EMOJI=❌
+          LABEL="${{ inputs.label }}"
+          IP="${{ inputs.ip }}/32"
+          MSG="$EMOJI Skooner ingress whitelist update ${STATUS}: ${IP}${LABEL:+ ($LABEL)} triggered by ${{ github.actor }} — ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -sS -X POST -H 'Content-type: application/json' \
+            --data "$(jq -nc --arg text "$MSG" '{text:$text}')" \
+            "$SLACK_WEBHOOK_URL" || true

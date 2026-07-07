@@ -1,0 +1,121 @@
+# Skooner (Kubernetes dashboard) — canvas-gke staging.
+#
+#   - Dedicated `skooner` namespace (GKE Autopilot blocks writes to kube-system).
+#   - nginx ingress on a nip.io host with a self-signed TLS secret, matching the
+#     canvas-web temp-access convention on this cluster (no public DNS / no
+#     letsencrypt ClusterIssuer wired up yet).
+#
+# The TLS secret `skooner-nip-tls` is created out-of-band (self-signed), e.g.:
+#   HOST=skooner.<ingress-nginx-lb-ip>.nip.io
+#   openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+#     -keyout skooner.key -out skooner.crt \
+#     -subj "/CN=$HOST" -addext "subjectAltName=DNS:$HOST"
+#   kubectl -n skooner create secret tls skooner-nip-tls --cert=skooner.crt --key=skooner.key
+#
+# Access uses a short-lived skooner-sa token (see the "Generate Skooner token"
+# workflow) and can be locked to source IPs via the whitelist workflow.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: skooner
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: skooner-sa
+  namespace: skooner
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: skooner-sa
+subjects:
+  - kind: ServiceAccount
+    name: skooner-sa
+    namespace: skooner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skooner
+  namespace: skooner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: skooner
+  template:
+    metadata:
+      labels:
+        k8s-app: skooner
+    spec:
+      serviceAccountName: skooner-sa
+      containers:
+        - name: skooner
+          image: ghcr.io/skooner-k8s/skooner:stable
+          ports:
+            - containerPort: 4654
+          livenessProbe:
+            httpGet:
+              scheme: HTTP
+              path: /
+              port: 4654
+            initialDelaySeconds: 30
+            timeoutSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      nodeSelector:
+        'kubernetes.io/os': linux
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: skooner
+  namespace: skooner
+spec:
+  ports:
+    - port: 80
+      targetPort: 4654
+  selector:
+    k8s-app: skooner
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: skooner-ingress
+  namespace: skooner
+  annotations:
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Lock down with the "Update Skooner Ingress IP Whitelist" workflow:
+    # nginx.ingress.kubernetes.io/whitelist-source-range: "203.0.113.10/32"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - skooner.35.222.47.79.nip.io
+      secretName: skooner-nip-tls
+  rules:
+    - host: skooner.35.222.47.79.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: skooner
+                port:
+                  number: 80
