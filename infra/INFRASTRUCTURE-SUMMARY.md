@@ -137,6 +137,10 @@ Terraform `>= 1.5`). State: GCS backend (bucket TBD).
   since deleted.
 - **Branch:** `infrastructure` (in this repo), pushed to `origin`.
 - Temp access: `https://35.222.47.79.nip.io` (self-signed cert).
+- **Admin login:** `https://35.222.47.79.nip.io/login` — email
+  `gke-admin@learningtapestry.com` (site + default-account admin). Password shared
+  privately (not committed). Recreate/reset via the idempotent rails-runner snippet
+  (User + Pseudonym on `Account.default`, granted `Account.site_admin`).
 
 ## Open items / to fill
 
