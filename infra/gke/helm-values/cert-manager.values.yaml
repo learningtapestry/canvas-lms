@@ -8,6 +8,15 @@
 crds:
   enabled: true
 
+# GKE Autopilot blocks writes to the managed kube-system namespace, so
+# cert-manager's default leader-election lease there fails ("denied by
+# managed-namespaces-limitation") — cainjector never becomes leader, never
+# injects the webhook CA, and every ACME resource is rejected with an x509
+# error. Point leader election at cert-manager's own namespace instead.
+global:
+  leaderElection:
+    namespace: cert-manager
+
 # Workload Identity: impersonate the least-privilege GSA (Cloud DNS admin for
 # DNS01). KSA -> GSA binding is created by Terraform (module.cert_manager_sa).
 serviceAccount:
