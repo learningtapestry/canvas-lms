@@ -1,24 +1,29 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: canvas-web-ingress
+  name: canvas-web-class
   namespace: canvas-staging
   annotations:
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # ingress-shim: cert-manager watches this + the tls block below and issues
+    # (and auto-renews) the cert into canvas-class-tls. No separate Certificate.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     # Canvas allows very large uploads (image sets NGINX_MAX_UPLOAD_SIZE=10g).
     nginx.ingress.kubernetes.io/proxy-body-size: "10g"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Do NOT set force-ssl-redirect: it 308-redirects the ACME HTTP-01 challenge
+    # path to HTTPS before the cert exists, breaking issuance AND renewal. With a
+    # tls block present, ingress-nginx already redirects normal traffic to HTTPS,
+    # and cert-manager's solver overrides that for /.well-known/acme-challenge.
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - canvas-staging.example.com
-      secretName: canvas-staging-tls
+        - class.nbdmath.org
+      secretName: canvas-class-tls
   rules:
-    - host: canvas-staging.example.com
+    - host: class.nbdmath.org
       http:
         paths:
           - path: /

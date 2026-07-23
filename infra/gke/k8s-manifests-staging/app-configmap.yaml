@@ -17,8 +17,8 @@ data:
   # redis.yml.cloud66
   REDIS_PORT: "6379"
   CANVAS_REDIS_DB: "0"
-  # domain.yml.cloud66 — replace with the real hostname
-  CANVAS_DOMAIN: canvas-staging.example.com
+  # domain.yml.cloud66 — the client's real hostname
+  CANVAS_DOMAIN: class.nbdmath.org
   CANVAS_SSL: "true"
   # security.yml.cloud66 (optional LTI issuer)
   CANVAS_LTI_ISS: https://canvas.instructure.com
