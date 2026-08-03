@@ -55,7 +55,10 @@ spec:
           resources:
             requests:
               cpu: "500m"
-              memory: "1Gi"
+              # inst-jobs uses ~1.5Gi; requesting 1Gi made it an eviction target
+              # under node memory pressure (colocated with canvas-web on the RWO
+              # PVC node). Request above real peak. See app-deployment.yaml.
+              memory: "2Gi"
             limits:
               cpu: "2"
               memory: "3Gi"

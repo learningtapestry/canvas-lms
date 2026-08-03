@@ -72,7 +72,12 @@ spec:
           resources:
             requests:
               cpu: "500m"
-              memory: "1Gi"
+              # Passenger (3 procs) + Rails steadily uses ~1.9Gi. Requesting 1Gi
+              # made the pod exceed its request and get evicted under node memory
+              # pressure (it shares a node with canvas-jobs via the RWO PVC),
+              # causing a restart loop. Request above real peak so it isn't an
+              # eviction target and Autopilot sizes the node correctly.
+              memory: "2560Mi"
             limits:
               cpu: "2"
               memory: "3Gi"
