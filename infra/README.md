@@ -72,7 +72,7 @@ operational detail.
 | Cache/jobs | **Memorystore** for Redis, **AUTH disabled** | matches cloud66 `redis.yml` (plain redis://) |
 | Attachments | **Local storage** on a **ReadWriteOnce PD** (`canvas-files` PVC) | web+jobs single-replica, colocated (approach B); prod → Filestore/object storage |
 | Registry | **Artifact Registry** (Docker) | Canvas image (built from cloud66-prod) |
-| Secrets | **Secret Manager** + External Secrets Operator | `POSTGRESQL_*`, `REDIS_ADDRESS`, `ENCRYPTION_KEY`, `JWT_ENCRYPTION_KEY`, `SECRET_KEY_BASE` |
+| Secrets | **Secret Manager** + External Secrets Operator | `POSTGRESQL_*`, `REDIS_ADDRESS`, `ENCRYPTION_KEY`, `JWT_ENCRYPTION_KEY`, `SECRET_KEY_BASE`, `SMTP_PASSWORD` |
 | Identity | **Workload Identity** + 3 GSAs (app, external-secrets, cert-manager) | fully keyless (no static SA keys) |
 | Ingress/TLS | **ingress-nginx** + cert-manager (Cloud DNS DNS01) | LB = GCP regional external passthrough Network LB (L4) @ 35.222.47.79; 10g upload limit |
 
@@ -89,6 +89,43 @@ operational detail.
 - **No static keys anywhere.** Local file storage removes the need for any object-
   storage credential. (A temp HMAC key + SA existed only for the one-off data
   migration and have been deleted.)
+
+## Secrets flow — dependency on GCP Secret Manager
+
+All application secrets live in **one GCP Secret Manager secret**,
+`canvas-secrets-<env>` (e.g. `canvas-secrets-staging`), stored as a single JSON
+blob. The runtime has a **hard dependency** on it: the pods hold no secrets of
+their own — they read a native k8s Secret that is populated *from* Secret Manager.
+
+Chain: **Secret Manager → External Secrets Operator → k8s Secret → pod env var**
+
+1. **Secret Manager** holds the JSON. Terraform assembles it
+   (`google_secret_manager_secret_version.app` in `environments/staging/main.tf`).
+   Current keys: `POSTGRESQL_ADDRESS`, `POSTGRESQL_PASSWORD`, `REDIS_ADDRESS`,
+   `ENCRYPTION_KEY`, `JWT_ENCRYPTION_KEY`, `SECRET_KEY_BASE`, `SMTP_PASSWORD`.
+2. **ESO** reads it via a `ClusterSecretStore` (`gcp-secret-manager`),
+   authenticating **keylessly with Workload Identity** (the
+   `canvas-external-secrets` GSA has `roles/secretmanager.secretAccessor`, scoped
+   to this secret). No static keys.
+3. The **`ExternalSecret`** (`canvas-secret`) does `dataFrom: extract` on the whole
+   JSON and materializes the native k8s Secret **`canvas-secrets`** — one JSON key
+   → one Secret key. So *adding a key to the JSON auto-appears* in `canvas-secrets`
+   (no ExternalSecret change needed); force an immediate resync with
+   `kubectl -n canvas-<env> annotate externalsecret canvas-secret force-sync=$(date +%s) --overwrite`.
+4. The pods consume it with `envFrom: secretRef: canvas-secrets` → every key
+   becomes an env var. Env changes need a pod roll to take effect.
+
+**Implications / operational notes:**
+- The plaintext values exist **only** in Secret Manager — never in git, never in a
+  ConfigMap, only as in-memory env vars in the pod.
+- Terraform rebuilds the whole JSON on each `apply`, so **every `apply` must pass
+  the sensitive `TF_VAR_*`** (`encryption_key`, `jwt_encryption_key`,
+  `secret_key_base`, `smtp_password`) or those values are cleared. See the Crypto
+  keys section.
+- If ESO is down or the WI binding breaks, existing pods keep their env (the k8s
+  Secret persists), but new/rolled pods can't get updated secrets until it recovers.
+- Non-secret config (DB name/port, domain, SMTP host/port/user/from) lives in the
+  `canvas-env` ConfigMap, not here.
 
 ## Crypto keys (ENCRYPTION_KEY / JWT_ENCRYPTION_KEY / SECRET_KEY_BASE)
 
