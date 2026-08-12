@@ -1,19 +1,12 @@
 # Skooner (Kubernetes dashboard) — canvas-gke staging.
 #
 #   - Dedicated `skooner` namespace (GKE Autopilot blocks writes to kube-system).
-#   - nginx ingress on a nip.io host with a self-signed TLS secret, matching the
-#     canvas-web temp-access convention on this cluster (no public DNS / no
-#     letsencrypt ClusterIssuer wired up yet).
-#
-# The TLS secret `skooner-nip-tls` is created out-of-band (self-signed), e.g.:
-#   HOST=skooner.<ingress-nginx-lb-ip>.nip.io
-#   openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
-#     -keyout skooner.key -out skooner.crt \
-#     -subj "/CN=$HOST" -addext "subjectAltName=DNS:$HOST"
-#   kubectl -n skooner create secret tls skooner-nip-tls --cert=skooner.crt --key=skooner.key
+#   - nginx ingress on `skooner.nbdmath.org` (GoDaddy A record -> the LB IP) with
+#     a real Let's Encrypt cert issued by cert-manager (secret `skooner-tls`).
 #
 # Access uses a short-lived skooner-sa token (see the "Generate Skooner token"
-# workflow) and can be locked to source IPs via the whitelist workflow.
+# workflow) and is locked to source IPs via the "Update Skooner Ingress IP
+# Whitelist" workflow (runtime-managed; not pinned in this manifest).
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -99,17 +92,21 @@ metadata:
   name: skooner-ingress
   namespace: skooner
   annotations:
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    # Lock down with the "Update Skooner Ingress IP Whitelist" workflow:
-    # nginx.ingress.kubernetes.io/whitelist-source-range: "203.0.113.10/32"
+    # Real Let's Encrypt cert via cert-manager (ingress-shim issues skooner-tls).
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # NOTE: do NOT set force-ssl-redirect — it 308-redirects the ACME HTTP-01
+    # challenge and breaks issuance/renewal. A tls block already gives HTTP->HTTPS.
+    # Access lock-down (whitelist-source-range) is managed at runtime by the
+    # "Update Skooner Ingress IP Whitelist" workflow — intentionally not set here
+    # so `kubectl apply` doesn't reset the live allow-list.
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - skooner.35.222.47.79.nip.io
-      secretName: skooner-nip-tls
+        - skooner.nbdmath.org
+      secretName: skooner-tls
   rules:
-    - host: skooner.35.222.47.79.nip.io
+    - host: skooner.nbdmath.org
       http:
         paths:
           - path: /
