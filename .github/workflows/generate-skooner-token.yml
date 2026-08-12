@@ -171,7 +171,7 @@ jobs:
                 { "type": "context", "elements": [
                     {"type":"mrkdwn", "text": "<\($run)|View run>"},
                     {"type":"mrkdwn", "text": $repo},
-                    {"type":"mrkdwn", "text": "<https://skooner.35.222.47.79.nip.io/#!workload|Open Skooner>"}
+                    {"type":"mrkdwn", "text": "<https://skooner.nbdmath.org/#!workload|Open Skooner>"}
                   ]
                 }
               ]
