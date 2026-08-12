@@ -92,3 +92,14 @@ variable "secret_key_base" {
   default     = null
   sensitive   = true
 }
+
+# SendGrid API key for outbound SMTP (SMTP_PASSWORD). Supply via
+# TF_VAR_smtp_password; never commit. Empty = SMTP auth unset (no mail).
+# Like the crypto keys, this is folded into the app secret JSON, so every
+# `apply` must pass it or the value is cleared.
+variable "smtp_password" {
+  description = "SendGrid SMTP API key (SMTP_PASSWORD). Set via TF_VAR_smtp_password; do NOT commit."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

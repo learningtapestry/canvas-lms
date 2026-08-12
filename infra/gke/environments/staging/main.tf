@@ -177,6 +177,9 @@ resource "google_secret_manager_secret_version" "app" {
     JWT_ENCRYPTION_KEY = coalesce(var.jwt_encryption_key, random_password.jwt_encryption_key.result)
     # Rails cookie signing (Cloud66 auto-provides this; we must too)
     SECRET_KEY_BASE = coalesce(var.secret_key_base, random_password.secret_key_base.result)
+    # outgoing_mail.yml — SendGrid SMTP API key (non-secret SMTP_* live in the
+    # canvas-env ConfigMap). Supply via TF_VAR_smtp_password; do NOT commit.
+    SMTP_PASSWORD = var.smtp_password
   })
 }
 

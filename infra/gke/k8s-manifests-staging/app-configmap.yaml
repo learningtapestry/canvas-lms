@@ -30,3 +30,11 @@ data:
   FILE_STORAGE_PATH_PREFIX: storage/files
   # delayed_jobs.yml.cloud66
   CANVAS_DELAYED_JOB_WORKERS: "2"
+  # outgoing_mail.yml — SendGrid SMTP (non-secret). The API key is
+  # SMTP_PASSWORD in the canvas-secrets Secret (via Secret Manager).
+  SMTP_ADDRESS: smtp.sendgrid.net
+  SMTP_PORT: "587"
+  SMTP_AUTHENTICATION: plain
+  SMTP_USERNAME: apikey
+  SMTP_DOMAIN: nbdmath.org
+  SMTP_OUTGOING_ADDRESS: info@nbdmath.org
