@@ -32,14 +32,14 @@ spec:
           # Activate the cloud66 config templates (the deploy-hook equivalent),
           # then run Passenger. Canvas sets public_file_server.enabled=false, so
           # it needs Passenger/nginx (not `rails server`) to serve public/dist.
-          # amazon_s3 / outgoing_mail are intentionally not copied -> local file
-          # storage, no SMTP.
+          # amazon_s3 is intentionally not copied -> local file storage.
+          # outgoing_mail is copied -> SendGrid SMTP (reads the SMTP_* env vars).
           command: ["/bin/bash", "-lc"]
           args:
             - |
               set -euo pipefail
               cd /usr/src/app
-              for f in database redis cache_store security domain file_store delayed_jobs; do
+              for f in database redis cache_store security domain file_store delayed_jobs outgoing_mail; do
                 cp "config/$f.yml.cloud66" "config/$f.yml"
               done
               exec passenger start -p 3000 -e production --max-pool-size 3 --min-instances 1 --start-timeout 300

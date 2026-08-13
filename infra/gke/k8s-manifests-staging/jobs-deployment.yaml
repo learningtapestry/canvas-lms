@@ -37,7 +37,7 @@ spec:
             - |
               set -euo pipefail
               cd /usr/src/app
-              for f in database redis cache_store security domain file_store delayed_jobs; do
+              for f in database redis cache_store security domain file_store delayed_jobs outgoing_mail; do
                 cp "config/$f.yml.cloud66" "config/$f.yml"
               done
               exec bundle exec script/delayed_job run
