@@ -97,6 +97,11 @@ jobs:
           LABEL="${{ inputs.label }}"
           IP="${{ inputs.ip }}/32"
           MSG="$EMOJI Skooner ingress whitelist update ${STATUS}: ${IP}${LABEL:+ ($LABEL)} triggered by ${{ github.actor }} — ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          curl -sS -X POST -H 'Content-type: application/json' \
+          # Strip any stray whitespace/newline the secret may carry (curl
+          # rejects a URL with an embedded newline: "Malformed input").
+          WEBHOOK="$(printf '%s' "$SLACK_WEBHOOK_URL" | tr -d '[:space:]')"
+          if ! curl -sS -X POST -H 'Content-type: application/json' \
             --data "$(jq -nc --arg text "$MSG" '{text:$text}')" \
-            "$SLACK_WEBHOOK_URL" || true
+            "$WEBHOOK"; then
+            echo "::warning::Slack notification failed (check the SLACK_WEBHOOK_URL secret)"
+          fi
