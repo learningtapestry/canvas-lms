@@ -65,21 +65,7 @@ spec:
           volumeMounts:
             - name: files
               mountPath: /usr/src/app/storage/files
-            - name: rce-config
-              mountPath: /usr/src/app/config/dynamic_settings.yml
-              subPath: dynamic_settings.yml
-              readOnly: true
-            - name: rce-credentials
-              mountPath: /usr/src/app/config/vault_contents.yml
-              subPath: vault_contents.yml
-              readOnly: true
       volumes:
         - name: files
           persistentVolumeClaim:
             claimName: canvas-files
-        - name: rce-config
-          configMap:
-            name: canvas-rce-config
-        - name: rce-credentials
-          secret:
-            secretName: canvas-rce-credentials
