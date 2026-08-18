@@ -1,0 +1,131 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: canvas-rce-config
+  namespace: canvas-staging
+data:
+  # Canvas uses this file as a local fallback when Consul is not configured.
+  # Keep the public RCE host scheme-less so Canvas uses the page's HTTPS scheme.
+  dynamic_settings.yml: |
+    production:
+      config:
+        canvas:
+          rich-content-service:
+            app-host: rce.class.nbdmath.org
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canvas-rce-api
+  namespace: canvas-staging
+  labels:
+    app: canvas-rce-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: canvas-rce-api
+  template:
+    metadata:
+      labels:
+        app: canvas-rce-api
+    spec:
+      containers:
+        - name: canvas-rce-api
+          # This is the image published by the upstream Canvas RCE API project.
+          image: instructure/canvas-rce-api:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: ECOSYSTEM_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: canvas-secrets
+                  key: RCE_ECOSYSTEM_KEY
+            - name: ECOSYSTEM_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: canvas-secrets
+                  key: RCE_ECOSYSTEM_SECRET
+            - name: CIPHER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: canvas-secrets
+                  key: RCE_CIPHER_PASSWORD
+            - name: PASSENGER_MIN_INSTANCES
+              value: "1"
+            - name: PASSENGER_MAX_POOL_SIZE
+              value: "2"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: canvas-rce-api
+  namespace: canvas-staging
+spec:
+  type: ClusterIP
+  selector:
+    app: canvas-rce-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: canvas-rce-api
+  namespace: canvas-staging
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10g"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - rce.class.nbdmath.org
+      secretName: canvas-rce-tls
+  rules:
+    - host: rce.class.nbdmath.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: canvas-rce-api
+                port:
+                  number: 80

@@ -48,6 +48,24 @@ resource "random_password" "jwt_encryption_key" {
   special = false
 }
 
+# Shared Canvas/RCE API service-JWT secrets. The encryption key must be exactly
+# 32 bytes; keep both values stable in Terraform state across deployments.
+resource "random_password" "rce_ecosystem_key" {
+  length  = 32
+  special = false
+}
+
+resource "random_password" "rce_ecosystem_secret" {
+  length  = 32
+  special = false
+}
+
+# Used internally by canvas-rce-api and not shared with Canvas.
+resource "random_password" "rce_cipher_password" {
+  length  = 32
+  special = false
+}
+
 # Rails secret_key_base — signs the session cookie. Cloud66 auto-injects this;
 # on GKE we must provide it, or Canvas can't set the session cookie (login
 # breaks). Stable value so sessions survive pod restarts.
@@ -175,6 +193,11 @@ resource "google_secret_manager_secret_version" "app" {
     # TF_VAR_*), otherwise a freshly generated key. See variables.tf.
     ENCRYPTION_KEY     = coalesce(var.encryption_key, random_password.encryption_key.result)
     JWT_ENCRYPTION_KEY = coalesce(var.jwt_encryption_key, random_password.jwt_encryption_key.result)
+    # canvas-rce-api service JWT. ECOSYSTEM_KEY is Canvas' encryption secret;
+    # ECOSYSTEM_SECRET is Canvas' signing secret.
+    RCE_ECOSYSTEM_KEY    = random_password.rce_ecosystem_key.result
+    RCE_ECOSYSTEM_SECRET = random_password.rce_ecosystem_secret.result
+    RCE_CIPHER_PASSWORD  = random_password.rce_cipher_password.result
     # Rails cookie signing (Cloud66 auto-provides this; we must too)
     SECRET_KEY_BASE = coalesce(var.secret_key_base, random_password.secret_key_base.result)
     # outgoing_mail.yml — SendGrid SMTP API key (non-secret SMTP_* live in the
