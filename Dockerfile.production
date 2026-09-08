@@ -72,10 +72,13 @@ RUN unset RUBY && bundle config --global build.nokogiri --use-system-libraries &
   bundle config --global build.ffi --enable-system-libffi && \
   bundle install
 # Cache yarn's package download directory across builds (BuildKit cache mount).
-# node_modules is rebuilt and then removed, so it never lands in the image; the
-# download cache only avoids re-fetching packages on every build. mode=0777 so
-# the `docker` user can write regardless of its uid.
-RUN --mount=type=cache,target=/home/docker/.cache/yarn,mode=0777 \
+# Use a dedicated dir (not ~/.cache/yarn) so the mount doesn't take ownership of
+# ~/.cache, which corepack also needs (it writes ~/.cache/node/corepack).
+# node_modules is rebuilt and then removed, so it never lands in the image; only
+# the download cache is reused. mode=0777 lets the `docker` user write regardless
+# of its uid.
+RUN --mount=type=cache,target=/home/docker/.yarn-cache,mode=0777 \
+  export YARN_CACHE_FOLDER=/home/docker/.yarn-cache && \
   yarn install --frozen-lockfile || yarn install --frozen-lockfile --network-concurrency 1 && \
   bin/rails canvas:compile_assets --trace && \
   rm -rf node_modules
